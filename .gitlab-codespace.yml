@@ -1,0 +1,5 @@
+services:
+  rust-server:
+    command: cargo run
+    ports:
+      - 8080:8080
