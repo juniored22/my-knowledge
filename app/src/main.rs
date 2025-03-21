@@ -67,6 +67,7 @@ async fn main() {
     .route("/foo",  get(get_foo))
     .route("/users", post(create_user))
     // Serve arquivos estáticos como /style.css ou /script.js
+    .nest_service("/libs", ServeDir::new("public/libs/node_modules"))
     .nest_service("/static", ServeDir::new("public"));
 
 
