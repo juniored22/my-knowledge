@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Cache-control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+  <title>Face Landmarker</title>
+
+  <link href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css" rel="stylesheet">
+  <script src="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"></script>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+  <section id="demos" class="invisible">
+    <div id="liveView" class="videoView">
+ 
+      <div>
+        <video id="webcam" autoplay playsinline width="480" height="360"></video>
+        <nav>
+            <button id="webcamButton" class="mdc-button mdc-button--raised">
+                <span class="mdc-button__ripple"></span>
+                <span class="mdc-button__label">▶</span>
+              </button>
+              <button id="recordBtn" class="mdc-button mdc-button--raised">
+                Gravar 10s
+              </button>
+        </nav>
+        <canvas id="mouthCanvas" style="border:1px solid transparent"></canvas>
+        <div style="position: relative;">
+          <canvas id="webcam_canvas" class="webcam_canvas" width="480" height="360"></canvas>
+          <canvas id="output_canvas" class="output_canvas" width="480" height="360"></canvas>
+          <canvas id="face_canvas" ></canvas>
+        </div>
+        
+
+      
+      </div>
+    
+    </div>
+    <div class="blend-shapes">
+      <ul id="video-blend-shapes" class="blend-shapes-list"></ul>
+    </div>
+  </section>
+
+  <script type="module" src="/static/script.js" ></script>
+</body>
+</html>

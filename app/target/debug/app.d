@@ -1,1 +1,1 @@
-/workspaces/my-knowledge/app/target/debug/app: /workspaces/my-knowledge/app/src/main.rs
+/workspaces/my-knowledge/app/target/debug/app: /workspaces/my-knowledge/app/src/handlers/home.rs /workspaces/my-knowledge/app/src/handlers/mod.rs /workspaces/my-knowledge/app/src/main.rs /workspaces/my-knowledge/app/src/routes/foo.rs /workspaces/my-knowledge/app/src/routes/home.rs /workspaces/my-knowledge/app/src/routes/mod.rs /workspaces/my-knowledge/app/src/routes/users.rs /workspaces/my-knowledge/app/src/utils/file.rs /workspaces/my-knowledge/app/src/utils/mod.rs
