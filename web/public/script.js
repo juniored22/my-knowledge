@@ -2,6 +2,10 @@
 // import vision from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
 import vision from "/libs/@mediapipe/tasks-vision/vision_bundle.mjs";
 
+import * as THREE from 'https://unpkg.com/three@0.155.0/build/three.module.js';
+import { OrbitControls } from '/static/OrbitControls.js'; // <-- arquivo local
+import { OBJLoader } from '/static/OBJLoader.js'; // <-- arquivo local
+
 // FaceLandmarker	Detecta pontos da face, íris, sobrancelhas, lábios etc.
 // FilesetResolver	Carrega os arquivos .wasm e resolve paths
 // DrawingUtils	Ferramentas para desenhar os pontos no canvas
@@ -19,67 +23,77 @@ const webcamCanvas = document.getElementById("webcam_canvas");
 const webcamCtx = webcamCanvas.getContext("2d");
 const mouthCanvas = document.getElementById("mouthCanvas");
 const mouthCtx = mouthCanvas.getContext("2d");
-
-
+const drawingUtils = new DrawingUtils(canvasCtx);
 const videoWidth = 480;
-let faceLandmarker, runningMode = "IMAGE", webcamRunning = false;
+const maxRecordingTimeMs = 10000;
+
+
+let faceLandmarker;
+let runningMode = "IMAGE"; 
+let webcamRunning = false;
 let lastVideoTime = -1;
 let results = undefined;
-const drawingUtils = new DrawingUtils(canvasCtx);
 
-let landmarkFrames = []; // <- guarda a animação
-const maxRecordingTimeMs = 10000;
-let recording = false;
-let recordingStart = 0;
+const record = {
+    bRecording:false,
+    iRecordingStart:0,
+    vLandmarkFrames:[]
+}
 
-let rotationY = 0; // ângulo de rotação em torno do eixo Y
-let rotationX = 0; // Inclinação vertical (eixo X)
-let isDragging = false;
-let lastMouseX = 0;
-let lastMouseY = 0;
+const mouse = {
+    rotationY:0,
+    rotationX:0,
+    isDragging:false,
+    lastMouseX:0,
+    lastMouseY:0
+}
 
-document.getElementById("recordBtn").addEventListener("click", () => {
-    recording = true;
-    recordingStart = performance.now();
-    landmarkFrames = [];
+function setRecording(record, value){
+    record.bRecording = value;
+    record.iRecordingStart = performance.now();
+    record.vLandmarkFrames = [];
+}
+
+function disabledButtons(value){
+    document.getElementById("recordBtn").disabled = value
+    document.getElementById("webcamButton").disabled = value
+}
+
+function startRecord(record, event){
+    disabledButtons(true);
+    setRecording(record, true)
     console.log("🎥 Gravando landmarks por 5 segundos...");
-    document.getElementById("recordBtn").disabled = true
-    document.getElementById("webcamButton").disabled = true
-    
-});
+}
 
-canvasElement.addEventListener("mousedown", (e) => {
-    isDragging = true;
-    lastMouseX = e.clientX;
-    lastMouseY = e.clientY;
-});
-  
-window.addEventListener("mouseup", () => {
-    isDragging = false;
-});
-  
-window.addEventListener("mousemove", (e) => {
-    if (!isDragging) return;
+function handlerMouseup(mouse, event){
+    mouse.isDragging = false;
+}
 
-    const deltaX = e.clientX - lastMouseX;
-    const deltaY = e.clientY - lastMouseY;
-    lastMouseX = e.clientX;
-    lastMouseY = e.clientY;
+function handlerMousedown(mouse, event){
+    mouse.isDragging = true;
+    mouse.lastMouseX = event.clientX;
+    mouse.lastMouseY = event.clientY;
+}
+
+function handlerMousemove(mouse, event){
+    if (!mouse.isDragging) return;
+
+    const deltaX = event.clientX - mouse.lastMouseX;
+    const deltaY = event.clientY - mouse.lastMouseY;
+    mouse.lastMouseX = event.clientX;
+    mouse.lastMouseY = event.clientY;
   
-    rotationY += deltaX * 0.005; // lateral = rotação Y
-    rotationX += deltaY * 0.005; // vertical = rotação X
+    mouse.rotationY += deltaX * 0.005; // lateral = rotação Y
+    mouse.rotationX += deltaY * 0.005; // vertical = rotação X
   
     // Limita para não virar de cabeça pra baixo
-    rotationX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, rotationX));
-});
+    mouse.rotationX = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, mouse.rotationX));
+}
 
-
-faceCanvas.addEventListener('click', ()=>{
-    faceCanvas.classList.toggle('face_canva_webcam_background');
-    canvasElement.classList.toggle('background_transparent')
-})
-
-console.log({vision});
+function addStyleActioveFaceCanvas(canvas, event){
+    canvas.faceCanvas.classList.toggle('face_canva_webcam_background');
+    canvas.canvasElement.classList.toggle('background_transparent');
+}
 
 async function initializeFaceLandmarker() {
 
@@ -208,15 +222,15 @@ async function predictWebcam() {
 
     }
 
-    if (recording && results.faceLandmarks && results.faceLandmarks.length > 0) {
+    if (record.bRecording && results.faceLandmarks && results.faceLandmarks.length > 0) {
         const now = performance.now();
-        if (now - recordingStart < maxRecordingTimeMs) {
+        if (now - record.iRecordingStart < maxRecordingTimeMs) {
             // Clona os landmarks do frame atual
             const landmarksCopy = structuredClone(results.faceLandmarks[0]);
-            landmarkFrames.push(landmarksCopy);
+            record.vLandmarkFrames.push(landmarksCopy);
         } else {
-            recording = false;
-            console.log("🛑 Gravação finalizada! Frames capturados:", landmarkFrames.length);
+            record.bRecording = false;
+            console.log("🛑 Gravação finalizada! Frames capturados:", record.vLandmarkFrames.length);
             toggleWebcam();
             setTimeout(playbackLandmarks, 1000); // espera 1s e toca a animação
         }
@@ -287,7 +301,7 @@ function drawBlendShapes(container, blendShapes) {
 }
 
 function playbackLandmarks() {
-    if (landmarkFrames.length === 0) return;
+    if (record.vLandmarkFrames.length === 0) return;
 
     let frameIndex = 0;
     const interval = 1000 / 60; // 30 fps
@@ -295,11 +309,11 @@ function playbackLandmarks() {
     const playbackInterval = setInterval(() => {
         canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
 
-        const frame = landmarkFrames[frameIndex];
+        const frame = record.vLandmarkFrames[frameIndex];
 
         if (frame) {
             // const rotated = rotateLandmarksY(frame, (90 * (Math.PI / 180)) ); // gira ~22.5 graus
-            const rotated = rotateLandmarksXY(frame, rotationY, rotationX);
+            const rotated = rotateLandmarksXY(frame, mouse.rotationY, mouse.rotationX);
             canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
             // drawLandmarks(drawingUtils, frame); // usa sua função existente
              drawLandmarks(drawingUtils, rotated);
@@ -310,7 +324,7 @@ function playbackLandmarks() {
             document.getElementById("recordBtn").disabled = false;
             document.getElementById("webcamButton").disabled = false;
             clearInterval(playbackInterval);
-            console.log("✅ Animação finalizada.", {landmarkFrames});
+            console.log("✅ Animação finalizada.", {vLandmarkFrames: record.vLandmarkFrames});
         }
     }, interval);
 }
@@ -399,10 +413,356 @@ function extractRegion(video, landmarks, indices, targetCanvas, targetCtx) {
     targetCtx.drawImage(video, minX, minY, width, height, 0, 0, width, height);
     targetCtx.restore();
 }
+
+function exportJson (){
+
+    if (record.vLandmarkFrames.length === 0) {
+        alert("Nada gravado ainda.");
+        return;
+    }
+
+    const exportData = {
+        landmarks: record.vLandmarkFrames,
+        // tesselation: FaceLandmarker.FACE_LANDMARKS_TESSELATION.map(({ start, end }) => [start, end])
+        edges: FaceLandmarker.FACE_LANDMARKS_TESSELATION.map(({ start, end }) => [start, end]),
+        triangles: generateTrianglesFromEdges(
+            FaceLandmarker.FACE_LANDMARKS_TESSELATION.map(({ start, end }) => [start, end])
+        )
+    };
+
+    const json = JSON.stringify(exportData, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "face_landmarks_with_tess.json";
+    a.click();
+
+
+    // startThreeVisualization(record.vLandmarkFrames, FaceLandmarker.FACE_LANDMARKS_TESSELATION.flatMap(pair => [pair.start, pair.end]));
+    // test()
+
+
+}
+
+function main(){
+    // Inicializa tudo
+    initializeFaceLandmarker();
+    if (hasGetUserMedia()) webcamButton.addEventListener("click", toggleWebcam);
+    else console.warn("getUserMedia() não é suportado neste navegador.");
+}
+
+function startThreeVisualization(frames, triangles) {
+
+    if (!frames?.[0]) {
+        console.error("❌ Nenhum frame carregado.");
+        return;
+    }
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    renderer.setSize(500, 500);
+    document.body.appendChild(renderer.domElement);
+
+    const cube = new THREE.Mesh(
+        new THREE.BoxGeometry(),
+        new THREE.MeshBasicMaterial({ color: 0x00ff00 })
+    );
+    scene.add(cube);
+
+
+    // Carrega o modelo OBJ
+    const loader = new OBJLoader();
+    loader.load(
+        '/static/faceMesh.obj', // ou 'caminho/para/seuarquivo.obj'
+        function (obj) {
+            // Corrigir posição
+            obj.position.set(0, -1, 0); // (x, y, z)
+        
+            // Corrigir escala
+            obj.scale.set(0.5, 0.5, 0.5); // escala menor se estiver grande demais
+        
+            // Corrigir rotação (em radianos)
+            obj.rotation.x = Math.PI / 2; // gira 90 graus no eixo X
+            // obj.rotation.y = Math.PI; // se quiser girar no eixo Y
+        
+            scene.add(obj);
+        },
+        function (xhr) {
+            console.log((xhr.loaded / xhr.total) * 100 + '% carregado');
+        },
+        function (error) {
+            console.error('Erro ao carregar OBJ:', error);
+        }
+    );
+    
+
+    camera.position.z = 3;
+
+    // 💡 Luz ambiente + direcional
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6); // luz suave
+    scene.add(ambientLight);
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(0, 0, 2); // vem da frente
+    scene.add(directionalLight);
+
+    // Cria a geometria da malha
+    const geometry = new THREE.BufferGeometry();
+    const vertices = new Float32Array(frames[0].flatMap(p => [
+        (p.x - 0.5) * 2,
+        (p.y - 0.5) * -2,
+        (p.z ?? 0) * 2
+    ]));
+
+    const indices = [];
+    for (let i = 0; i < triangles.length; i += 3) {
+        indices.push(triangles[i], triangles[i + 1], triangles[i + 2]);
+    }
+
+    geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+    geometry.setIndex(indices);
+    geometry.computeVertexNormals();
+
+    // Material com luz e profundidade
+    const material = new THREE.MeshStandardMaterial({
+        color: 0x44aa88,
+        metalness: 0.2,
+        roughness: 0.6,
+        side: THREE.DoubleSide
+    });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    scene.add(mesh);
+
+    // 🎥 Animação
+    let frameIndex = 0;
+    function animate() {
+        requestAnimationFrame(animate);
+
+        const points = frames[frameIndex % frames.length];
+        for (let i = 0; i < points.length; i++) {
+            geometry.attributes.position.setXYZ(
+                i,
+                (points[i].x - 0.5) * 2,
+                (points[i].y - 0.5) * -2,
+                (points[i].z ?? 0) * 2
+            );
+        }
+        geometry.attributes.position.needsUpdate = true;
+
+        mesh.rotation.y += 0.005; // rotação automática
+
+        renderer.render(scene, camera);
+        frameIndex++;
+        controls.update(); // importante
+    }
+
+    animate();
+}
+
+function test(){
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    renderer.setSize(500, 500);
+    document.body.appendChild(renderer.domElement);
+  
+    // const cube = new THREE.Mesh(
+    //   new THREE.BoxGeometry(),
+    //   new THREE.MeshBasicMaterial({ color: 0x00ff00 })
+    // );
+    // scene.add(cube);
+    // console.log({cube});
+    
+  
+    camera.position.z = 5;
+
+
+    // Carrega o modelo OBJ
+    const loader = new OBJLoader();
+    loader.load(
+        '/static/faceMesh.obj', // ou 'caminho/para/seuarquivo.obj'
+        function (obj) {
+
+            // Aumentar o tamanho do modelo
+            obj.scale.set(20, 20, 20); // dobra o tamanho no eixo X, Y, Z
+            obj.position.set(0, 0, 0);
+            // obj.rotation.x = Math.PI / 2;
+            // obj.rotation.y = Math.PI;
+            // obj.rotation.z = Math.PI;
+            // const geometry = obj.children[0].geometry; // pode ser obj.geometry se for direto
+            // geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+            // geometry.attributes.position.needsUpdate = true;
+            
+            // scene.add(obj);
+    
+        },
+        function (xhr) {
+            console.log((xhr.loaded / xhr.total) * 100 + '% carregado');
+        },
+        function (error) {
+            console.error('Erro ao carregar OBJ:', error);
+        }
+    );
+
+
+
+    const points = record.vLandmarkFrames[0]; // ou results.faceLandmarks[0]
+    const triangles = FaceLandmarker.FACE_LANDMARKS_TESSELATION.map(({ start, end }) => [start, end]);
+    const geometry = new THREE.BufferGeometry();
+
+    const uvs = new Float32Array(points.flatMap(p => [p.x, 1 - p.y]));
+
+    const scale = 8.0; // você pode ajustar esse valor
+
+    const vertices = new Float32Array(points.flatMap(p => [
+    (p.x - 0.5) * scale,
+    (p.y - 0.5) * -scale,
+    -(p.z ?? 0) * scale
+    ]));
+
+    // ⚠️ Agora você precisa transformar os pares de edges em triângulos:
+    const faces = generateTrianglesFromEdges(triangles); // você já tem essa função
+
+
+    const indices = new Uint16Array(faces.flat());
+    geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+    geometry.computeVertexNormals();
+
+
+    // geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+    // geometry.setIndex(faces.flat()); // flat porque cada triângulo é [a, b, c]
+    // geometry.computeVertexNormals();
+
+    // AQUI: cria a textura a partir do canvas com a face
+    const texture = new THREE.VideoTexture(video);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    texture.format = THREE.RGBAFormat;
+    texture.flipY = true; // obrigatório para vídeo/webcam
+    texture.needsUpdate = true;
+
+    const material = new THREE.MeshStandardMaterial({
+        map: texture,
+        metalness: 0.1,
+        roughness: 0.6,
+        side: THREE.DoubleSide
+      });
+
+ 
+
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.y = -0.5;
+    scene.add(mesh);
+
+
+
+    
+
+
+    // 💡 Luz ambiente + direcional
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6); // luz suave
+    scene.add(ambientLight);
+
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+    directionalLight.position.set(0, 0, 2); // vem da frente
+    scene.add(directionalLight);
   
 
+  
+    function animate() {
+      requestAnimationFrame(animate);
+      controls.update();
+      renderer.render(scene, camera);
+    }
+  
+    animate();
+}
 
-// Inicializa tudo
-initializeFaceLandmarker();
-if (hasGetUserMedia()) webcamButton.addEventListener("click", toggleWebcam);
-else console.warn("getUserMedia() não é suportado neste navegador.");
+function generateTrianglesFromEdges(edges) {
+    const neighbors = {};
+
+    // Monta um mapa de vizinhos para cada ponto
+    edges.forEach(([a, b]) => {
+        if (!neighbors[a]) neighbors[a] = new Set();
+        if (!neighbors[b]) neighbors[b] = new Set();
+        neighbors[a].add(b);
+        neighbors[b].add(a);
+    });
+
+    const triangles = new Set();
+
+    edges.forEach(([a, b]) => {
+        // Encontra vizinhos comuns de a e b
+        const common = [...(neighbors[a] || [])].filter(c => neighbors[b].has(c));
+        for (const c of common) {
+            const tri = [a, b, c].sort((x, y) => x - y).join(",");
+            triangles.add(tri);
+        }
+    });
+
+    // Converte set para array de arrays
+    return [...triangles].map(t => t.split(",").map(Number));
+}
+
+function createFaceMeshFromLandmarks(points, edges, scene) {
+    const geometry = new THREE.BufferGeometry();
+  
+    // ESCALA para trazer os pontos normalizados para o espaço 3D
+    const scale = 2.0;
+  
+    // Positions (x, y, z) - centralizado e invertido no eixo Y
+    const vertices = new Float32Array(points.flatMap(p => [
+      (p.x - 0.5) * scale,  // X
+      (p.y - 0.5) * -scale, // Y (invertido para bater com o mundo 3D)
+      (p.z ?? 0) * scale    // Z
+    ]));
+  
+    // UV Mapping: usa os pontos x e y diretamente, pois já estão normalizados (0~1)
+    const uvs = new Float32Array(points.flatMap(p => [p.x, 1 - p.y]));
+  
+    // Índices (triângulos)
+    const triangles = generateTrianglesFromEdges(edges); // você já tem essa função
+    const indices = new Uint16Array(triangles.flat());
+  
+    geometry.setAttribute('position', new THREE.BufferAttribute(vertices, 3));
+    geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geometry.setIndex(new THREE.BufferAttribute(indices, 1));
+    geometry.computeVertexNormals();
+  
+    // TEXTURA (opcional)
+    const texture = new THREE.TextureLoader().load('/static/faceTexture.jpg'); // ou extraída do vídeo
+    texture.flipY = false; // importante para UV funcionar com vídeo ou canvas
+  
+    const material = new THREE.MeshStandardMaterial({
+      map: texture,
+      metalness: 0.2,
+      roughness: 0.6,
+      side: THREE.DoubleSide
+    });
+  
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.y = -0.5; // ajuste fino
+    scene.add(mesh);
+  
+    return mesh;
+  }
+
+
+  
+
+document.getElementById("recordBtn").addEventListener("click", (event) => startRecord(record, event) );
+canvasElement.addEventListener("mousedown", (event) => handlerMousedown(mouse, event) );
+window.addEventListener("mouseup", (event) => handlerMouseup(mouse, event) );
+window.addEventListener("mousemove", (event) => handlerMousemove(mouse, event));
+faceCanvas.addEventListener('click', (event) => addStyleActioveFaceCanvas({faceCanvas, canvasElement}, event));
+document.getElementById("exportBtn").addEventListener("click", exportJson);
+
+main();
