@@ -9,35 +9,48 @@
 
   <link href="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.css" rel="stylesheet">
   <script src="https://unpkg.com/material-components-web@latest/dist/material-components-web.min.js"></script>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="/static/style.css?v=0.5">
 </head>
 
 <body>
   <section id="demos" class="invisible">
+  
+
     <div id="liveView" class="videoView">
  
-      <div>
+      <div class="divCanvasMain">
         <video id="webcam" autoplay playsinline width="480" height="360"></video>
-        <nav>
-            <button id="webcamButton" class="mdc-button mdc-button--raised">
-                <span class="mdc-button__ripple"></span>
-                <span class="mdc-button__label">▶</span>
-              </button>
-              <button id="recordBtn" class="mdc-button mdc-button--raised">Gravar 10s</button>
-              <button id="exportBtn" class="mdc-button mdc-button--raised">Exportar para Blender</button>
-        </nav>
+
         <canvas id="mouthCanvas" style="border:1px solid transparent"></canvas>
-        <div style="position: relative;">
-          <canvas id="webcam_canvas" class="webcam_canvas" width="480" height="360"></canvas>
+        
+        <div style="position: relative;" class="divCanvas">
+          <canvas id="webcam_canvas" class="webcam_canvas" width="480" height="270"></canvas>
           <canvas id="output_canvas" class="output_canvas" width="480" height="360"></canvas>
           <canvas id="face_canvas" ></canvas>
         </div>
+
+        <div id="threejs-container" ></div>
+
       </div>
     </div>
-    <div class="blend-shapes">
+
+   
+
+    <div class="blend-shapes" style="display: none;">
       <ul id="video-blend-shapes" class="blend-shapes-list"></ul>
     </div>
+    
   </section>
+
+  <nav>
+      <button id="webcamButton" class="mdc-button mdc-button--raised">
+          <span class="mdc-button__ripple"></span>
+          <span class="mdc-button__label">▶</span>
+        </button>
+        <button id="recordBtn" class="mdc-button mdc-button--raised">Gravar 10s</button>
+        <button id="exportBtn" class="mdc-button mdc-button--raised">Exportar para Blender</button>
+        <button id="threeBtn" class="mdc-button mdc-button--raised">Three js</button>
+  </nav>
 
 
   <script type="module" src="/static/script.js" ></script>

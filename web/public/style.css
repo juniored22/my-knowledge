@@ -6,10 +6,13 @@
 }
 body {
   font-family: helvetica, arial, sans-serif;
-  margin: 2em;
   color: #3d3d3d;
   --mdc-theme-primary: #007f8b;
   --mdc-theme-on-primary: #f1f3f4;
+  height: 100vh;
+  width: 100vw;
+  padding: 0 !important;;
+  margin: 0 !important;
 }
 
 h1 {
@@ -33,7 +36,7 @@ video {
   -webkit-transform: rotateY(180deg);
   -moz-transform: rotateY(180deg);
   background: #17171721;
-  margin: 0 2px 8px 0;
+  margin: 11px  2px 8px 0;
     border-radius: 12px;
 
 
@@ -67,9 +70,20 @@ footer {
 .blend-shapes {
   position: relative;
   float: left;
-  width: 48%;
+  width: 100%;
   margin: 2% 1%;
   cursor: pointer;
+}
+
+.videoView{
+  position: relative;
+  float: left;
+  width: 100%;
+  margin: 2% 1%;
+  cursor: pointer;
+  height: 100%;
+  margin: 0;
+  padding: 0;
 }
 
 .videoView p,
@@ -177,15 +191,129 @@ video {
     border-radius: 13px;
 }
 
-#mouthCanvas{
+#mouthCanvas {
   /* border: 1px solid red; */
   position: absolute;
   z-index: 1;
-  top: 15px;
+  bottom: 13px;
   /* display: none; */
-  right: 34%;
+  /* right: 34%; */
   border-radius: 13px;
-  width: 74px;
+  width: 46px;
+  left: 18px;
 }
 
+
+#threejs-container{
+  width: 480px;
+  height: 360px;
+  margin-top: 11px;
+  background: #fbf9f9;
+  border-radius: 13px;
+}
+
+#threejs-container canvas{
+  border-radius: 13px;
+}
+
+
+@media (max-width: 768px) {
+  video, canvas {
+    width: 100vw;
+    height: auto;
+    max-height: 100vh;
+    object-fit: cover;
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 10000
+  }
+
+  .divCanvas{
+    /* display: none; */
+  }
+
+  #output_canvas{
+    width: 90vw !important;
+    height: 34vh !important;
+    margin:0
+  }
+  
+
+  .divCanvasMain{
+    padding: 0 !important;
+  }
+
+
+
+  #mouthCanvas {
+    width: 80px;
+    height: 80px;
+    bottom: 8px;
+    left: 8px;
+  }
+
+  nav {
+    flex-direction: column;
+    /* top: 8px; */
+    right: 8px;
+    gap: 6px;
+    z-index: 10000;
+  }
+
+  .blend-shapes {
+    font-size: 10px;
+    max-width: 90vw;
+    bottom: 4px;
+    right: 4px;
+  }
+
+  #webcam{
+    width: 100% !important;
+    height: 34% !important;
+    margin: 0 !important;
+  }
+
+  
+
+  .divCanvasMain {
+    height: 100%;
+    padding: 0;
+    box-sizing: border-box;
+
+  }
+
+  #threejs-container{
+    display: none;
+  }
+
+  .webcam_canvas{
+    display: none;
+  }
+
+}
+
+nav{
+  position: absolute;
+  bottom: 25px;
+  margin: 0 auto;
+  left: 0;
+  right: 0;
+  text-align: center;
+}
+
+#demos{
+  width: 100%;
+  height: 100%;
+}
+
+.divCanvasMain{
+  width: 100%;
+  display: flex;
+  gap: 22px;    
+  height: auto;
+  padding: 1px 20px;
+  box-sizing: border-box;
+
+}
 
