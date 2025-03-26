@@ -1,5 +1,6 @@
 {
   "dependencies": {
-    "@mediapipe/tasks-vision": "^0.10.3"
+    "@mediapipe/tasks-vision": "^0.10.3",
+    "three": "^0.174.0"
   }
 }

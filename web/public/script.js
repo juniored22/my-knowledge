@@ -3,8 +3,8 @@
 import vision from "/libs/@mediapipe/tasks-vision/vision_bundle.mjs";
 
 import * as THREE from 'https://unpkg.com/three@0.155.0/build/three.module.js';
-import { OrbitControls } from '/static/OrbitControls.js'; // <-- arquivo local
-import { OBJLoader } from '/static/OBJLoader.js'; // <-- arquivo local
+import { OrbitControls } from '/static/modules/OrbitControls.js'; // <-- arquivo local
+import { OBJLoader } from '/static/modules/OBJLoader.js'; // <-- arquivo local
 import { TRIANGULATION } from "/static/shared/triangulation.js";
 
 // FaceLandmarker	Detecta pontos da face, íris, sobrancelhas, lábios etc.

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <title>Jogo FPS com Three.js</title>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    canvas { display: block; }
+    #instrucoes {
+      position: absolute; top: 50%; width: 100%; text-align: center; color: #fff;
+      font-family: Arial, sans-serif; user-select: none; font-size: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div id="instrucoes">Clique para iniciar o controle FPS</div>
+  
+  <script type="module">
+    import * as THREE from 'https://cdn.skypack.dev/three';
+    import { PointerLockControls } from 'https://cdn.skypack.dev/three/examples/jsm/controls/PointerLockControls.js';
+
+    //=== CENA E RENDERIZADOR ===
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x444444);
+
+    const camera = new THREE.PerspectiveCamera(
+      75, 
+      window.innerWidth / window.innerHeight, 
+      0.1, 
+      1000
+    );
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    //=== CONTROLES FPS (PointerLock) ===
+    const controls = new PointerLockControls(camera, renderer.domElement);
+
+    // Por conveniência, deixamos a câmera “flutuando” a certa altura:
+    camera.position.set(0, 2, 5);
+    scene.add(camera);
+
+    // Clique na tela para ativar o “trava-ponteiro” (PointerLock)
+    const instrucoes = document.getElementById('instrucoes');
+    document.addEventListener('click', () => {
+      controls.lock();
+    });
+    controls.addEventListener('lock', () => { instrucoes.style.display = 'none'; });
+    controls.addEventListener('unlock', () => { instrucoes.style.display = ''; });
+
+    //=== MÃO EM FORMA DE CUBO SIMPLES ===
+    // Adicionamos um pequeno cubo à frente da câmera para representar mãos do jogador.
+    const maoGeo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
+    const maoMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    const mao = new THREE.Mesh(maoGeo, maoMat);
+    // Posição ajustada para ficar um pouco à frente e à direita da câmera (simulando "mãos")
+    mao.position.set(0.4, -0.2, -1);
+    camera.add(mao);
+
+    //=== PLANO “CHÃO” PARA CAMINHAR ===
+    const floorGeo = new THREE.PlaneGeometry(200, 200);
+    floorGeo.rotateX(-Math.PI / 2);
+    const floorMat = new THREE.MeshBasicMaterial({ color: 0x00ff00, wireframe: true });
+    const floor = new THREE.Mesh(floorGeo, floorMat);
+    scene.add(floor);
+
+    //=== LÓGICA DE MOVIMENTAÇÃO FPS ===
+    let moveForward = false;
+    let moveBackward = false;
+    let moveLeft = false;
+    let moveRight = false;
+    let canJump = true; 
+    const velocity = new THREE.Vector3();
+    const direction = new THREE.Vector3();
+
+    const onKeyDown = (event) => {
+      switch (event.code) {
+        case 'ArrowUp':
+        case 'KeyW':
+          moveForward = true;
+          break;
+        case 'ArrowDown':
+        case 'KeyS':
+          moveBackward = true;
+          break;
+        case 'ArrowLeft':
+        case 'KeyA':
+          moveLeft = true;
+          break;
+        case 'ArrowRight':
+        case 'KeyD':
+          moveRight = true;
+          break;
+        case 'Space':
+          if (canJump) { 
+            velocity.y += 5; // “Impulso” ao pular
+            canJump = false;
+          }
+          break;
+      }
+    };
+
+    const onKeyUp = (event) => {
+      switch (event.code) {
+        case 'ArrowUp':
+        case 'KeyW':
+          moveForward = false;
+          break;
+        case 'ArrowDown':
+        case 'KeyS':
+          moveBackward = false;
+          break;
+        case 'ArrowLeft':
+        case 'KeyA':
+          moveLeft = false;
+          break;
+        case 'ArrowRight':
+        case 'KeyD':
+          moveRight = false;
+          break;
+      }
+    };
+
+    document.addEventListener('keydown', onKeyDown);
+    document.addEventListener('keyup', onKeyUp);
+
+    // Para efeitos de animação
+    let prevTime = performance.now();
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const time = performance.now();
+      const delta = (time - prevTime) / 1000; // delta em segundos
+      prevTime = time;
+
+      // Movimentação suave
+      velocity.x -= velocity.x * 10.0 * delta;
+      velocity.z -= velocity.z * 10.0 * delta;
+      velocity.y -= 9.8 * 5.0 * delta; // “gravidade simples”
+
+      direction.z = Number(moveForward) - Number(moveBackward);
+      direction.x = Number(moveRight) - Number(moveLeft);
+      direction.normalize();
+
+      const speed = 5.0; // velocidade
+      if (moveForward || moveBackward) velocity.z -= direction.z * speed * delta;
+      if (moveLeft || moveRight) velocity.x -= direction.x * speed * delta;
+
+      // Movimenta pelos eixos horizontal (x, z) usando o PointerLockControls
+      controls.moveRight(-velocity.x * delta);
+      controls.moveForward(-velocity.z * delta);
+
+      // Ajuste de Y da câmera (pulo/gravity)
+      camera.position.y += velocity.y * delta;
+      if (camera.position.y < 2) {
+        velocity.y = 0;
+        camera.position.y = 2; 
+        canJump = true;
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    animate();
+  </script>
+</body>
+</html>
