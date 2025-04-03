@@ -1,24 +1,63 @@
 import * as THREE from 'https://esm.sh/three';
-import { PointerLockControls } from 'https://esm.sh/three/examples/jsm/controls/PointerLockControls';
 import { VRButton } from 'https://esm.sh/three/examples/jsm/webxr/VRButton';
-import { DeviceOrientationControls } from '/static/modules/DeviceOrientationControls.mjs';
+import { GLTFLoader } from 'https://esm.sh/three/examples/jsm/loaders/GLTFLoader';
+import { PointerLockControls }          from 'https://esm.sh/three/examples/jsm/controls/PointerLockControls';
+import { DeviceOrientationControls }    from '/static/modules/DeviceOrientationControls.mjs';
+import * as dat from 'https://esm.sh/dat.gui';
 import vision from "/libs/@mediapipe/tasks-vision/vision_bundle.mjs";
+// import vision from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
 
-
-console.log({vision});
+const DEBUGGER = true;
 
 const { HandLandmarker , FilesetResolver, DrawingUtils } = vision;
-
 const performanceStart = performance.now(); 
 const overlayCanvas = document.getElementById('overlay');
 const ctx = overlayCanvas.getContext('2d');
+
 let handLandmarker = null;
 let latestResults = null;
 let landmarkMeshes = [];
 let videoTexture = null;
+let previousZ = 0; // Raio/valor inicial de z
+let radius = 0.1;
+let frameCounter = 0;
+let handModelRight = null;
+let handBonesRight = null;
 const video = document.getElementById('webcam');
 
-const Game = {
+const boneMapRight = {
+    0: 'mixamorigRightHand',
+    1: 'mixamorigRightHandThumb1',
+    2: 'mixamorigRightHandThumb2',
+    3: 'mixamorigRightHandThumb3',
+    4: 'mixamorigRightHandThumb4',
+    5: 'mixamorigRightHandIndex1',
+    6: 'mixamorigRightHandIndex2',
+    7: 'mixamorigRightHandIndex3',
+    8: 'mixamorigRightHandIndex4',
+    9: 'mixamorigRightHandMiddle1',
+   10: 'mixamorigRightHandMiddle2',
+   11: 'mixamorigRightHandMiddle3',
+   12: 'mixamorigRightHandMiddle4',
+   13: 'mixamorigRightHandRing1',
+   14: 'mixamorigRightHandRing2',
+   15: 'mixamorigRightHandRing3',
+   16: 'mixamorigRightHandRing4',
+   17: 'mixamorigRightHandPinky1',
+   18: 'mixamorigRightHandPinky2',
+   19: 'mixamorigRightHandPinky3',
+   20: 'mixamorigRightHandPinky4',
+  };
+
+const handConnections = [
+    [0, 1], [1, 2], [2, 3], [3, 4],
+    [0, 5], [5, 6], [6, 7], [7, 8],
+    [0, 9], [9, 10], [10, 11], [11, 12],
+    [0, 13], [13, 14], [14, 15], [15, 16],
+    [0, 17], [17, 18], [18, 19], [19, 20]
+];
+
+window.Game = {
     scene: new THREE.Scene(),
     camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
     clock: new THREE.Clock(),
@@ -39,7 +78,19 @@ const Game = {
             name: 'John Due',
             mesh:{
                 leftHand: null,
-                rightHand: null
+                rightHand: null,
+                hands: {
+                    left: {
+                        prevLandmarks: null,
+                        bones : {},
+                        model : null
+                    },
+                    right: {
+                        prevLandmarks: null,
+                        bones : {},
+                        model : null
+                    },
+                }
             }
         }
     ],
@@ -57,10 +108,22 @@ const Game = {
     }
 }
 
+const handRotationOffset = {
+    x: 0,   // graus
+    y: 0,
+    z: 180
+};
+
 Game.renderer.setClearColor(0xffffff);
 Game.renderer.setSize(window.innerWidth, window.innerHeight);
 Game.renderer.xr.enabled = true;
 Game.objAmbientLight.directionalLight.position.set(10, 10, 10);
+Game.camera.lookAt(0, 0, 0);
+
+Game.scene.add(new THREE.GridHelper( 200, 200 ));
+
+const cameraHelper = new THREE.CameraHelper( Game.camera );
+Game.scene.add( cameraHelper );
 
 if (Game.divice.mobile) {
     Game.controlsMobile = new DeviceOrientationControls(Game.camera);
@@ -68,6 +131,8 @@ if (Game.divice.mobile) {
 } else {
     Game.controls = new PointerLockControls(Game.camera, document.body);
 }
+
+Game.controls.object.position.set(0, 1.8, 3);
 
 async function requestDeviceOrientationPermission() {
     if (typeof Game.controlsMobile !== 'undefined' && typeof Game.controlsMobile.requestPermission === 'function') {
@@ -108,6 +173,9 @@ if (!Game.divice.mobile) {
     instructions.style.display = 'none'; // Não exibe instruções no mobile
 }
 
+//TODO: Remover
+// instructions.style.display = 'none'; // Não exibe instruções no mobile
+
 Game.scene.add(Game.objAmbientLight.directionalLight);
 Game.scene.add(Game.objAmbientLight.ambientLight);
 Game.scene.add(Game.controls.object);
@@ -118,28 +186,30 @@ Game.level.floor.position.y = -1;
 Game.scene.add(Game.level.floor);
 
 // Mãos
-const handGeo = new THREE.BoxGeometry(0.3, 0.3, 0.3);
-const handMat = new THREE.MeshStandardMaterial({ color: 0x00ffcc });
-Game.players[0].mesh.leftHand = new THREE.Mesh(handGeo, handMat);
-Game.players[0].mesh.rightHand = new THREE.Mesh(handGeo, handMat);
+const handGeo = new THREE.BoxGeometry(0.02, 0.02, 0);
+const handMatRight = new THREE.MeshStandardMaterial({ color: 0x0000ff  });
+const handMatLeft = new THREE.MeshStandardMaterial({ color: 0x00ffcc });
+Game.players[0].mesh.leftHand = new THREE.Mesh(handGeo, handMatLeft);
+Game.players[0].mesh.rightHand = new THREE.Mesh(handGeo, handMatRight);
 
-Game.players[0].mesh.leftHand.position.set(-0.3, -0.3, -0.7);
-Game.players[0].mesh.rightHand.position.set(0.3, -0.3, -0.7);
-Game.camera.add(Game.players[0].mesh.leftHand);
-Game.camera.add(Game.players[0].mesh.rightHand);
+// Game.players[0].mesh.leftHand.position.set(-0.3, -0.3, -0.7);
+// Game.players[0].mesh.rightHand.position.set(0.3, -0.3, -0.7);
+// Game.camera.add(Game.players[0].mesh.leftHand);
+// Game.camera.add(Game.players[0].mesh.rightHand);
 
 // Cubo com física fake
 const cubeSize = 1;
 const physicsCube = new THREE.Mesh(
     new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize),
     new THREE.MeshStandardMaterial({ color: 0xff4444 }));
-physicsCube.position.set(0, 0, -5);
+physicsCube.position.set(0, 0.5, 0);
+physicsCube.add(new THREE.AxesHelper(1));
 Game.scene.add(physicsCube);
+
 
 const cubeVelocity = new THREE.Vector3();
 const keys = {};
 const vVelocity = new THREE.Vector3();
-
 
 document.addEventListener('keydown', e => keys[e.code] = true);
 document.addEventListener('keyup', e => keys[e.code] = false);
@@ -152,272 +222,467 @@ const cameraDirection = new THREE.Vector3();
 Game.camera.getWorldDirection(cameraDirection);
 Game.scene.add( cube );
 // cube.position.copy(Game.camera.position).add(cameraDirection.multiplyScalar(-2));
-cube.position.set(10, 0, -5);
+cube.position.set(10, 0.5, 0);
+cube.add(new THREE.AxesHelper(1));
+// cube.add(new THREE.PolarGridHelper( 10, 16, 6, 64 ));
 
+
+  
+const gui = new dat.GUI();
+const folder = gui.addFolder('Hand Rotation Offset');
+folder.add(handRotationOffset, 'x', -180, 180).step(1).name('X - inclinação');
+folder.add(handRotationOffset, 'y', -180, 180).step(1).name('Y - palma');
+folder.add(handRotationOffset, 'z', -180, 180).step(1).name('Z - lateral');
+folder.open();
 
 function infoGame (){
     console.log({performance: performance.now() - performanceStart, clock: Game.clock.getDelta()});
     setTimeout(infoGame, 100);
 }
 
+async function webcamEnabled() {
+    DEBUGGER && console.log("[webcamEnabled]");
+    
+    video.autoplay = true;
+    video.muted = true;
+    video.playsInline = true;
+
+    if (!overlayCanvas) {
+        alert("Canvas não encontrado!");
+        return;
+    }
+
+    // Solicita a webcam
+    await navigator.mediaDevices.getUserMedia({ 
+        video: {
+            facingMode: "user", // Para usar a câmera frontal (se disponível)
+            width: { ideal: 640  }, // Resolução de 1280px de largura (ideal para detecção precisa)
+            height: { ideal: 480 }, // Resolução de 720px de altura
+            frameRate: { ideal: 30, max: 60 }, // Taxa de quadros ideal de 30fps, podendo chegar a 60fps
+        }
+     }).then((stream) => {
+        video.srcObject = stream;
+        video.play();
+        
+        // Verifica se o vídeo foi carregado antes de iniciar o HandLandmarker
+        video.addEventListener('loadeddata', () => {
+            console.log('Webcam carregada');
+            initHandLandmarker().then( ()=>{
+                detectLoop().then( uploadGLTF );
+            }); // Inicializa o HandLandmarker após o vídeo ser carregado
+        });
+      
+    });
+
+}
+
+async function bootstrap() {
+    DEBUGGER && console.log("[bootstrap]");
+    webcamEnabled().then( ()=>{
+        Game.players[0].mesh.hands.right = createHandpointsMesh('right');
+        Game.players[0].mesh.hands.left = createHandpointsMesh('left');
+    } );
+}
+
 async function initHandLandmarker(){
+    DEBUGGER && console.log("[initHandLandmarker]");
     const filesetResolver = await FilesetResolver.forVisionTasks("/libs/@mediapipe/tasks-vision/wasm");
 
-    console.log({vision, HandLandmarker, FilesetResolver: filesetResolver, DrawingUtils});
-    
+    // Verifique se o canvas e o vídeo estão disponíveis
+    if (!overlayCanvas || !video) {
+        console.error("Canvas ou vídeo não encontrados!");
+        return;
+    }
+
     handLandmarker = await HandLandmarker.createFromOptions(filesetResolver, {
         baseOptions: {
-        //  modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+        //  modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
             modelAssetPath: "/libs/@mediapipe/tasks-vision/hand_landmarker.task",
             delegate: "GPU"
         },
-        outputFaceBlendshapes: true,
+        outputFaceBlendshapes: false,
+        // minTrackConfidence: 0.4, // Ajuste conforme necessário 0.0 - 1.0	0.5
+        // minHandPresenceConfidence: 0.0, // Ajuste conforme necessário
+        // minHandDetectionConfidence: 0.5,
         runningMode: "VIDEO",
         numHands: 2
     });
+  
 }
 
-function centerHand(landmarks) {
-    const base = landmarks[0]; // ponto 0 = pulso
-    return landmarks.map((pt) => ({
-      x: pt.x - base.x,
-      y: pt.y - base.y,
-      z: pt.z - base.z
-    }));
-  }
+function createHandpointsMesh(label) {
 
-  async function _detectLoop() {
-    while (true) {
-      if (video.readyState >= 2 && handLandmarker) {
-        const now = performance.now();
-        const results = handLandmarker.detectForVideo(video, now);
-  
-        // Ajusta canvas ao vídeo
-        overlayCanvas.width = 480;
-        overlayCanvas.height = 480;
-        // ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-  
-        if (results.landmarks && results.landmarks.length > 0) {
-          const rotation = {
-            pitch: -Math.PI / 6, // inclina para frente
-            yaw: 0,
-            roll: 0
-          };
-  
-          results.landmarks.forEach((landmarks, i) => {
-            const handLabel = results.handedness?.[i]?.[0]?.categoryName || "Unknown";
-            const color = handLabel === "Left" ? "blue" : "green";
-  
-            for (const point of landmarks) {
-                // Aplica rotação 3D ao ponto
-                const rotated = rotate3D(point, rotation);
-    
-                // ❗ Corrige a inversão horizontal (espelhamento do vídeo)
-                const mirroredX = 1.0 - rotated.x;
-    
-                // Escala e posiciona na tela
-                const x = mirroredX * overlayCanvas.width;
-                const y = rotated.y * overlayCanvas.height;
-    
-                // Simula perspectiva via z-depth (tamanho menor = mais distante)
-                //   const perspectiveScale = 1 / (1 + rotated.z * 4);
-                //   const radius = Math.max(0.5, 6 * perspectiveScale);  // evita valor negativo
-                const depthScale = 1 + rotated.z * 2; // z vai de 0 a ~0.4
-                // const radius = 6 * depthScale;
-                const radius = Math.max(0.5, 6 * depthScale);
-            
-                console.log({radius: radius.toFixed(2), depth: rotated.z.toFixed(2)});
-                
-  
-                ctx.beginPath();
-                ctx.arc(x, y, radius, 0, 2 * Math.PI);
-                ctx.fillStyle = color;
-                ctx.fill();
-            }
-          });
-        }
+    DEBUGGER && console.log(`[createHandpointsMesh][${label}]`);
 
-        // ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+    Game.players[0].mesh.hands.right.prevLandmarks = Game.players[0].mesh.hands.right.prevLandmarks || null;
+    Game.players[0].mesh.hands.left.prevLandmarks  = Game.players[0].mesh.hands.left.prevLandmarks  || null;
+
+    // 2. Criação de uma Geometria para os Pontos
+    // Supondo que cada mão tenha 21 landmarks; ajuste conforme o retorno do seu modelo. ou 42 se estiver trabalhando com 2 mãos
+    const positions = new Float32Array(42 * 3); // 3 coordenadas por ponto (x, y, z)
+    const pointsGeometry = new THREE.BufferGeometry();
+    pointsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+    // 3. Material e Objeto Points
+    const pointsMaterial = new THREE.PointsMaterial({ color: label === 'left' ? 0x0000ff : 0x00ff00 , size: 0.02, transparent: true, opacity: 0.5 });
+    const pointsMesh = new THREE.Points(pointsGeometry, pointsMaterial);
+
+    // ✅ Novo grupo para agrupar pontos + eixo
+    const handGroup = new THREE.Group();
+    // handGroup.position.set(0.5, -0.5, -1.5); // posição base da mão
+    handGroup.add(pointsMesh);              // adiciona os pontos ao grupo
+    const axesHelper = new THREE.AxesHelper(0.3);
+    handGroup.add(axesHelper); // adiciona o eixo
+
+    // Game.camera.add(pointsMesh);
+     // Adiciona o grupo à câmera (ou cena)
+     Game.camera.add(handGroup);
+
+    // Posicione o mesh em uma posição que simule as mãos em primeira pessoa
+    // pointsMesh.position.set(0.5, -0.5, -1.5);
+    // pointsMesh.add(new THREE.AxesHelper(0.1));
+
+    // const arrowHelperGrup = new THREE.Group();
+    // const eixo_x = new THREE.Vector3( 1, 0, 0 ).normalize();
+    // const eixo_y = new THREE.Vector3( 0, 1, 0 ).normalize();
+    // const eixo_z = new THREE.Vector3( 0, 0, 1).normalize();
+    // const origin = new THREE.Vector3( 0.5, -0.5, -1.5 );
+    // const length = 0.3;
+    // const arrowHelperX = new THREE.ArrowHelper( eixo_x, origin, length, 0xff0000 );
+    // const arrowHelperY = new THREE.ArrowHelper( eixo_y, origin, length, 0x00ff00 );
+    // const arrowHelperZ = new THREE.ArrowHelper( eixo_z, origin, length, 0x0000ff );
+    // arrowHelperGrup.add( arrowHelperY );
+    // arrowHelperGrup.add( arrowHelperZ );
+    // arrowHelperGrup.add( arrowHelperX );
+    // Game.camera.add( arrowHelperGrup );
+
+    // Número de conexões e vértices (2 pontos por conexão)
+    const numEdges = handConnections.length;
+    const positionsEdges = new Float32Array(numEdges * 2 * 3); // 3 coordenadas por vértice
+    // Cria a geometria para as arestas
+    const edgesGeometry = new THREE.BufferGeometry();
+    edgesGeometry.setAttribute('position', new THREE.BufferAttribute(positionsEdges, 3));
+    // Material para desenhar as linhas (edges)
+    const edgesMaterial = new THREE.LineBasicMaterial({ color: 0x00ff00 });
+    // Cria o mesh que representa as arestas
+    const edgesMesh = new THREE.LineSegments(edgesGeometry, edgesMaterial);
+    Game.camera.add(edgesMesh);
+    edgesMesh.position.set(0.5, -0.5, -1.5); // mesma posição dos pontos
+
+
+    return { label, pointsMesh, pointsGeometry, edgesMesh, edgesGeometry,   prevLandmarks: null, group: handGroup,axesHelper};
+
+}
+
+// Função para suavizar os pontos usando interpolação exponencial
+function smoothPoints(prevPoints, currPoints, alpha = 0.5) {
+    return currPoints.map((point, idx) => {
+      if (prevPoints && prevPoints[idx]) {
+        return {
+          x: alpha * prevPoints[idx].x + (1 - alpha) * point.x,
+          y: alpha * prevPoints[idx].y + (1 - alpha) * point.y,
+          z: alpha * prevPoints[idx].z + (1 - alpha) * point.z
+        };
       }
-  
-      await new Promise(r => setTimeout(r, 100));
-    }
-  }
+      return point;
+    });
+}
 
-  // Função para atualizar a posição das mãos
-  function updateHandPosition(handMesh, landmarks, results) {
+// 4. Função para Atualizar os Vértices com os Landmarks
+function updatePoints(hand, landmarks, label) {
+
+    
+    // landmarks: array de objetos com {x, y, z} em coordenadas normalizadas (0 a 1)
+    const positionAttr = hand.pointsGeometry.getAttribute('position');
+    const scale = 3; 
+
+    // Se existirem pontos anteriores, suaviza os novos pontos
+    const smoothLandmarks = hand.prevLandmarks 
+    ? smoothPoints(hand.prevLandmarks, landmarks, 0.8)
+    : landmarks;
+
+    // for (let i = 0; i < landmarks.length; i++) {
+    //   // Mapeia as coordenadas normalizadas para o sistema de coordenadas do Three.js
+    //   let x = (landmarks[i].x - 0.5) * scale;      // de 0-1 para -1 a 1
+    //   let y = -(landmarks[i].y - 0.5) * scale;     // inverte o eixo y, pois no canvas y aumenta para baixo
+    //   let z = landmarks[i].z * scale;                // ajuste conforme necessário
+    //   x = -x; // Inverte a coordenada X (flip)
+
+    //   positionAttr.array[i * 3] = x;
+    //   positionAttr.array[i * 3 + 1] = y;
+    //   positionAttr.array[i * 3 + 2] = z;
+
+    // //   console.log({z});
+    // }
+    // positionAttr.needsUpdate = true;
+
+    // Atualiza os pontos no BufferGeometry
+    for (let i = 0; i < smoothLandmarks.length; i++) {
+        let x = (smoothLandmarks[i].x - 0.5) * scale;  // de 0-1 para -1 a 1
+        let y = -(smoothLandmarks[i].y - 0.5) * scale; // inverte o eixo y
+        let z = smoothLandmarks[i].z * scale;
+        x = -x; // Inverte a coordenada X para o efeito desejado
+
+        positionAttr.array[i * 3]     = x;
+        positionAttr.array[i * 3 + 1] = y;
+        positionAttr.array[i * 3 + 2] = z;
+
+    }
+    positionAttr.needsUpdate = true;
+    
+    // Armazena os pontos atuais para a próxima iteração
+    hand.prevLandmarks = smoothLandmarks;
+
+    
+
+    // Atualiza SkinnedMesh (se houver bones associados)
+    if (Game.players[0].mesh.hands.bones && label === "Right") {
+
+        updateHandSkeletonFromLandmarks(Game.players[0].mesh.hands.bones, smoothLandmarks, Game.players[0].mesh.hands.model);
+    }
+    
+    
+}
+
+// Função para atualizar a posição das mãos
+function updateHandPosition(handMesh, landmarks, results, radius) {
     // Mapeando as coordenadas normalizadas (0-1) para o sistema de coordenadas 3D do Three.js
-    const wrist = landmarks[9]; // Ponto do pulso, por exemplo
-  
+    const wrist = landmarks[0]; // Ponto do pulso, por exemplo
+
     // Normalizando para o espaço de coordenadas 3D do Three.js (ajustando conforme necessário)
     let x = wrist.x * 2 - 1; // Convertendo de 0-1 para -1 a 1 (para o eixo X)
     const y = -(wrist.y * 2 - 1); // Convertendo de 0-1 para -1 a 1 (para o eixo Y) e invertendo para ajustar a direção
-    let z = (wrist.z * 4 - 1); // Ajustando a profundidade (z) dependendo do modelo, mas pode ser necessário um ajuste adicional
+    let z = (wrist.z * radius - 1); // Ajustando a profundidade (z) dependendo do modelo, mas pode ser necessário um ajuste adicional
     // Aplica o flip horizontal diretamente na coordenada x
     x = -x; // Inverte a coordenada X (flip)
     z = z * 1;
-    
-   console.log(z);
-   
-    // Atualiza a posição do objeto no Three.js
-    handMesh.position.set(x, y, z);
 
-    // overlayCanvas.width = video.videoWidth;
-    // overlayCanvas.height = video.videoHeight;
-    // ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+    if (results && results.landmarks && results.handednesses.length > 0) {
+        // Atualiza cada mão detectada
+        results.landmarks.forEach((landmarks, i) => {
+            const label = results.handednesses?.[i]?.[0]?.categoryName;
+            const origem = {x:0, y:0, z:-1.5};
+            if (label === "Left") {
+                const handObj = Game.players[0].mesh.hands.left;
+                handObj.pointsMesh.position.set(origem.x, origem.y, origem.z);
+                updatePoints(handObj, landmarks, label);
+                // updateEdges(handObj, landmarks);
+            
+            } else if (label === "Right") {
+                const handObj = Game.players[0].mesh.hands.right;
+                handObj.pointsMesh.position.set(origem.x, origem.y, origem.z);
+                updatePoints(handObj, landmarks, label);
+                // updateEdges(handObj, landmarks);
+            }
+        });
+      }
 
-    // const handLabel = results.handednesses?.[0]?.[0]?.categoryName || "Unknown";
-    // const handIndex = results.handednesses?.[0]?.[0]?.index || 0;
-    // const color = handLabel === "Left" ? "blue" : "green";
-    // console.log({x:landmarks[0].x.toFixed(4), handLabel:handLabel, handIndex, results});
 
 
-  }
-
-
-  function onResults(results) {
-    if (results.handLandmarks) {
-      const landmarks = results.handLandmarks[0]; // Primeira mão detectada (se houver)
+}
   
-      // Atualiza a posição da mão no Three.js
-      updateHandPosition(Game.players[0].mesh.leftHand, landmarks);
+async function detectLoop() {
+
+    if(typeof _loopDebugger0 == 'undefined'){
+        window._loopDebugger0 = true;
+        DEBUGGER && console.log("[detectLoop]", Game);
     }
-  }
-
-  // Função para processar o quadro e chamar o modelo do MediaPipe
-function processVideoFrame() {
-    if (!handLandmarker) {
-        console.log('HandLandmarker ainda não inicializado.');
-        return;
-      }
     
-      
-      const videoFrame = captureVideoFrame(); // Captura o quadro de vídeo atual
-      const results = handLandmarker.detect(videoFrame); // Chama a detecção
+    requestAnimationFrame(detectLoop);
+    frameCounter++;
 
-    
-    
-      if (results.handednesses && results.handednesses.length > 0) {
-        const landmarks = results.landmarks[0]; // Primeira mão detectada
-        console.log('Processando quadro...',results);
-        updateHandPosition(Game.players[0].mesh.leftHand, landmarks, results);
-      }
+    // Processa somente a cada 2 frames
+    if (frameCounter % 2 !== 0) return;
 
-  }
-
-  function captureVideoFrame() {
-    // Cria um canvas temporário
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-  
-    // Desenha o quadro atual do vídeo no canvas
-    const context = canvas.getContext('2d');
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
-  
-    // Retorna o quadro como uma imagem (pode ser usado como entrada para MediaPipe)
-    return canvas;
-  }
-  
-
-  async function detectLoop() {
-    while (true) {
-      if (video.readyState >= 2 && handLandmarker) {
+    if (video.readyState >= 2 && handLandmarker) {
         const now = performance.now();
         const results = handLandmarker.detectForVideo(video, now);
-        
-       
-        
-   
+    
         // Ajusta o canvas ao tamanho do vídeo
         overlayCanvas.width = video.videoWidth;
         overlayCanvas.height = video.videoHeight;
         ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-       /*
-        // Aplica transformação para rotação no canvas (primeira pessoa)
-        const rotationAngle = Math.PI / 6; // Rotação de 30 graus, ajuste conforme necessário
-        ctx.setTransform(
-          Math.cos(rotationAngle), Math.sin(rotationAngle), 
-          -Math.sin(rotationAngle), Math.cos(rotationAngle),
-          overlayCanvas.width / 2, overlayCanvas.height / 2
-        );
-         */
+
         // Agora desenha os landmarks com a rotação aplicada ao canvas
         if (results.landmarks && results.landmarks.length > 0) {
-        
-          results.landmarks.forEach((landmarks, i) => {
 
+            Game.players[0].resultDetectForVideo = results;
 
-            
-            const handLabel = results.handednesses?.[i]?.[0]?.categoryName || "Unknown";
-            const handIndex = results.handednesses?.[i]?.[0]?.index || 0;
-            const color = handLabel === "Left" ? "blue" : "green";
-            console.log({x:landmarks[9]});
+            results.landmarks.forEach((landmarks, i) => {
+                const handLabel = results.handednesses?.[i]?.[0]?.categoryName || "Unknown";
+                const handIndex = results.handednesses?.[i]?.[0]?.index || 0;
+                const color = handLabel === "Left" ? "blue" : "green";
 
-            landmarks.forEach((point) => {
-              // Aplica rotação nos pontos individuais
-              const rotated = rotate3D(point, { pitch: -Math.PI / 6, yaw: 0, roll: 0 });
-  
-              // Corrige inversão horizontal
-              const mirroredX = 1.0 - rotated.x;
-  
-              // Escala e posiciona na tela com perspectiva (opcional, mas você pode manter)
-              const x = mirroredX * overlayCanvas.width;
-              const y = rotated.y * overlayCanvas.height;
-              const z = rotated.z * overlayCanvas.height;
-  
-              // Desenha o ponto na tela
-              ctx.beginPath();
-              const flippedX = overlayCanvas.width - point.x.toFixed(4) * overlayCanvas.width;
-              ctx.arc(flippedX, point.y.toFixed(4) * overlayCanvas.height, 10, 0, 2 * Math.PI);
-              ctx.fillStyle = color;
-              ctx.fill();
-              ctx.closePath(); // Fecha o caminho
+                drawPointsCanvas(landmarks, overlayCanvas, ctx, color, handLabel);
+
+                if(handLabel === "Left") {
+                    updateHandPosition(Game.players[0].mesh.rightHand, landmarks, results, radius);
+                }
+
+                if(handLabel === "Right") {
+                    updateHandPosition(Game.players[0].mesh.leftHand, landmarks, results, radius);
+                }
+                
             });
+        }    
+    }
+    
+}
 
-            if(handLabel === "Left") {
-                updateHandPosition(Game.players[0].mesh.rightHand, landmarks, results);
-            }
+function drawPointsCanvas(landmarks, overlayCanvas, ctx, color, label) {
+    let arrayIndexOrder = [0, 4,  8,  20, 5, 17];
+    let areaIndex = [];
 
-            if(handLabel === "Right") {
-                updateHandPosition(Game.players[0].mesh.leftHand, landmarks, results);
-            }
-            
-         
+    landmarks.forEach((point, i) => {
+        // Aplica rotação nos pontos individuais
+        const rotated = rotate3D(point, { pitch: 0 * (Math.PI / 180), yaw: 0, roll: 0 });
 
-            /*
-            for (const point of landmarks) {
-              // Aplica rotação nos pontos individuais
-              const rotated = rotate3D(point, { pitch: -Math.PI / 6, yaw: 0, roll: 0 });
+        // Corrige inversão horizontal
+        const mirroredX = 1.0 - rotated.x;
+
+        // Escala e posiciona na tela com perspectiva (opcional, mas você pode manter)
+        const x = mirroredX * overlayCanvas.width;
+        const y = rotated.y * overlayCanvas.height;
+        // const z = rotated.z * overlayCanvas.height;
+
+        // Manipula o valor de z para simular profundidade
+        let z = point.z * overlayCanvas.height;
+
+        // Inverte o comportamento de z: diminui se o novo valor for maior, aumenta se o novo valor for menor
+        z = (z < previousZ) ? z + 5 : z - 5;
+
+        // Atualiza o valor de z para a próxima iteração
+        previousZ = z;
+
+        // Agora usamos z para alterar o tamanho do ponto (simulando profundidade)
+        let radius = 10 + (z / 50); // Ajusta o tamanho do ponto com base em z (quanto maior o z, maior o ponto)
+
+        // radius = Math.max(0, radius);
+        // radius = (point.z * overlayCanvas.height);
+        // radius = (radius < 0 ? 0 : radius) * 10000;
+        // radius = (radius + 2) > 10 ? 10 : radius + 2;
+        radius = 6;
+
+
+        // Desenha o ponto na tela
+        ctx.beginPath();
+        const flippedX = overlayCanvas.width - point.x.toFixed(4) * overlayCanvas.width;
+        ctx.arc(flippedX, point.y.toFixed(4) * overlayCanvas.height, radius, 0, 2 * Math.PI);
+        ctx.fillStyle = arrayIndexOrder.includes(i) ? "yellow" : color;
+        ctx.fill();
+        ctx.closePath(); // Fecha o caminho
+
   
-              // Corrige inversão horizontal
-              const mirroredX = 1.0 - rotated.x;
+
   
-              // Escala e posiciona na tela com perspectiva (opcional, mas você pode manter)
-              const x = mirroredX * overlayCanvas.width;
-              const y = rotated.y * overlayCanvas.height;
-  
-              // Ajusta a profundidade (escala)
-              const depthScale = 1 + rotated.z * 2;
-              const radius = Math.max(0.5, 6 * depthScale);
-  
-              // Desenha no canvas
-              ctx.beginPath();
-              ctx.arc(x, y, radius, 0, 2 * Math.PI);
-              ctx.fillStyle = color;
-              ctx.fill();
-            }
-                */
-          });
         
-        }
+
+        if(arrayIndexOrder.includes(i)) {
+            // Desenha cada coordenada com uma cor diferente
+            const xText = `${(x / overlayCanvas.width).toFixed(2)}`;
+            const yText = `${(y / overlayCanvas.height).toFixed(2)}`;
+            const zText = `${((point.z * overlayCanvas.height) * 1000).toFixed(2)}`;
 
        
-      }
+        
+            // Cor para o x
+            ctx.fillStyle = 'green';        
+            ctx.fillText(xText, x, y);
+            
+            // Cor para o y
+            ctx.fillStyle = 'red';
+            ctx.fillText(yText, x + ctx.measureText(xText).width + 5, y);  // Posição ajustada para o próximo valor
+        
+            // Cor para o z
+            ctx.fillStyle = 'blue';
+            ctx.fillText(zText, x + ctx.measureText(xText).width + ctx.measureText(yText).width + 10, y);  // Posição ajustada
+            ctx.fillStyle = 'white';
+          
+
+            areaIndex[areaIndex.length] = [x, y, parseFloat(zText), i];
+            areaIndex = areaIndex.filter(item => item !== null);
+
+            
+            // Posicionamento e desenhando o texto
+            if (areaIndex.length === 6) {
+
+                areaIndex.sort((a, b) => {
+                    const indexA = arrayIndexOrder.indexOf(a[3]);
+                    const indexB = arrayIndexOrder.indexOf(b[3]);
+                    return indexA - indexB;
+                });
+
+                areaIndex.forEach((coords, i) => {
+                    // Calcula a posição vertical com base no índice
+                    const offsetY = (y / overlayCanvas.height) + 20 + (i * 10);
+                
+                    // Formata as coordenadas
+                    const formattedText = formatCoordinates(coords);
+
+                    // Desenha o texto na posição calculada
+                    ctx.fillText(formattedText, (x / overlayCanvas.width) + 20, offsetY);
+                });
+
+                // Ligando as coordenadas com linhas
+                ctx.beginPath();
+                
+                ctx.moveTo(areaIndex[0][0], areaIndex[0][1] );  // Posição inicial 0
+                ctx.lineTo(areaIndex[1][0], areaIndex[1][1] );  // Posição final 4
+                ctx.moveTo(areaIndex[1][0], areaIndex[1][1] );  // Posição inicial 4
+                ctx.lineTo(areaIndex[2][0], areaIndex[2][1] );  // Posição final 8
+                ctx.moveTo(areaIndex[2][0], areaIndex[2][1] );  // Posição inicial 8
+                ctx.lineTo(areaIndex[3][0], areaIndex[3][1] );  // Posição final 20
+                ctx.moveTo(areaIndex[3][0], areaIndex[3][1] );  // Posição inicial 20
+                ctx.lineTo(areaIndex[0][0], areaIndex[0][1] );  // Posição final 0
+                ctx.strokeStyle = 'green';  // Cor da linha
+              
+           
+                ctx.lineWidth = 5; 
+                ctx.stroke();
+                ctx.closePath();  // Fecha o caminho da linha
+
+                ctx.beginPath();
+                ctx.moveTo(areaIndex[4][0], areaIndex[4][1] );  // Posição inicial 5
+                ctx.lineTo(areaIndex[5][0], areaIndex[5][1] );  // Posição final 17
+                ctx.moveTo(areaIndex[5][0], areaIndex[5][1] );  // Posição final 17
+                ctx.lineTo(areaIndex[0][0], areaIndex[0][1] );  // Posição final 0
+
+                ctx.moveTo(areaIndex[5][0], areaIndex[5][1] );  // Posição final 17
+                ctx.lineTo(areaIndex[3][0], areaIndex[3][1] );  // Posição inicial 20
+
+                ctx.moveTo(areaIndex[4][0], areaIndex[4][1] );  // Posição inicial 5
+                ctx.lineTo(areaIndex[1][0], areaIndex[1][1] );  // Posição final 4
+
+                ctx.moveTo(areaIndex[4][0], areaIndex[4][1] );  // Posição inicial 5
+                ctx.lineTo(areaIndex[2][0], areaIndex[2][1] );  // Posição final 8
+        
+            
+
+                ctx.strokeStyle = 'blue';  // Cor da linha
+                ctx.stroke();
+                ctx.closePath();  // Fecha o caminho da linha
+            }
+
+       
+ 
+        }
   
-      await new Promise(r => setTimeout(r, 5)); // espera 100ms
-    }
-  }
+    });
+}
+
+// Função para formatar as coordenadas X, Y, Z
+const formatCoordinates = (coords) => {
+    return coords.map((item, i) => {
+        switch (i) {
+            case 0:
+                return `X: ${(item / overlayCanvas.width).toFixed(2)}`;
+            case 1:
+                return `Y: ${(item / overlayCanvas.height).toFixed(2)}`;
+            default:
+                return `Z: ${item.toFixed(2)}`;
+        }
+    }).join(', ');
+};
 
 function rotate3D(point, angles) {
     const { x, y, z } = point;
@@ -439,54 +704,6 @@ function rotate3D(point, angles) {
     let z3 = z2;
   
     return { x: x3, y: y3, z: z3 };
-}
-
-function loopHandLandmarker() {
-  // Limpa landmarks antigos
-//   landmarkMeshes.forEach(mesh => Game.camera.remove(mesh));
-  landmarkMeshes = [];
-
-  console.log('aqui');
-
-  if (latestResults?.landmarks?.length > 0) {
-    latestResults.landmarks.forEach(handLandmarks => {
-        handLandmarks.forEach((point) => {
-        //   const x = (point.x - 0.5) * 2;
-        //   const y = -(point.y - 0.5) * 2;
-        //   const z = point.z * 40; // <-- z positivo para estar NA FRENTE
-  
-        //   const sphere = new THREE.Mesh(
-        //     new THREE.SphereGeometry(0.02),
-        //     new THREE.MeshBasicMaterial({ color: 0xff0000 })
-        //   );
-  
-        //   sphere.position.set(x, y, z);
-        //   Game.camera.add(sphere); // Agora vai seguir a câmera
-        //   landmarkMeshes.push(sphere);
-          console.log({point});
-          
-        });
-      });
-  }
-}
-
-function webcamEnabled() {
-
-    video.autoplay = true;
-    video.muted = true;
-    video.playsInline = true;
-
-    // Solicita a webcam
-    navigator.mediaDevices.getUserMedia({ video: {
-        facingMode: { ideal: "user" }, // "environment" ou "user"
-        // width: { ideal: 480 },               // largura desejada
-        // height: { ideal: 360 }                // altura desejada
-    } }).then((stream) => {
-      video.srcObject = stream;
-      video.play();
-      initHandLandmarker();
-    });
-
 }
 
 function setVelocityXZY({vVelocity, keys, delta}){
@@ -581,7 +798,280 @@ function handlerDevicemotion(event){
   console.log("Rot rate alpha:", rotRate.alpha, "°/s");
 }
 
+function uploadGLTF(event){
+    console.log("[uploadGLTF]");
+    
+    const loader = new GLTFLoader();
+    let handModel;
+    
+    loader.load('/static/models/character.glb', (gltf) => {
+        handModel = gltf.scene;
+        handModel.scale.set(8, 8, 8);
+        handModel.position.set(0, 0, -1.5); // um pouco abaixo e à frente da visão
+        handModel.rotation.set(
+            THREE.MathUtils.degToRad(-90), // pitch
+            THREE.MathUtils.degToRad(0), // yaw 
+            THREE.MathUtils.degToRad(150) // roll
+        );
+        const axesHelper = new THREE.AxesHelper(1);
+        handModel.add(axesHelper);
+        // Rotaciona se estiver de costas
+        // handModel.rotation.y = Math.PI; // Gira 180° se estiver de costas
+
+        Game.camera.add(handModel); // Para manter sempre visível
+        // handModel.position.set(0, 1, -1); // Em relação à câmera
+        console.log({handModel});
+    
+
+        handBonesRight = {};
+        gltf.scene.traverse((obj) => {
+            if (obj.isBone) {
+                handBonesRight[obj.name] = obj;
+            }
+        });
+
+        const bones = getBonesFromModel(handModel);
+        Game.players[0].mesh.hands.model = handModel;
+        Game.players[0].mesh.hands.bones = bones;
+
+        // const helper = new THREE.AxesHelper(0.2);
+        // Game.players[0].mesh.hands.model.add(helper);
+      
+
+    }, undefined, (error) => {
+      console.error('Erro ao carregar o modelo da mão:', error);
+    });
+
+
+    
+}
+
+function updateHandSkeletonFromLandmarks(bones, landmarks, model, boneMap = boneMapRight, scale = 4) {
+
+
+    if (!bones || !landmarks || landmarks.length !== 21) return;
+
+    if(typeof _loopDebugger1 == 'undefined'){
+        window._loopDebugger1 = true;
+        DEBUGGER && console.log("[updateHandSkeletonFromLandmarks]", handBonesRight);
+    }
+    
+        
+    // 🟢 1. Base: posição do pulso (landmark 0)
+    const wrist = landmarks[0];
+    const wristPos = new THREE.Vector3(
+      (1.0 - wrist.x - 0.5) * scale,
+      -(wrist.y - 0.5) * scale,
+      wrist.z * scale
+    );
+  
+    // 🔧 2. Aplica offset de posição (para ajustar onde a mão aparece na cena)
+    const positionOffset = new THREE.Vector3(0, 0, -2.0); // ajuste fino para visão em 1ª pessoa
+    const adjustedPos = wristPos.clone().add(positionOffset);
+    model.position.copy(adjustedPos);
+
+
+
+
+
+   
+  
+    // 🔄 3. Calcula rotação automática com base nos landmarks da palma
+    const indexBase = new THREE.Vector3(
+      (1.0 - landmarks[5].x - 0.5) * scale,
+      -(landmarks[5].y - 0.5) * scale,
+      landmarks[5].z * scale
+    );
+  
+    const pinkyBase = new THREE.Vector3(
+      (1.0 - landmarks[17].x - 0.5) * scale,
+      -(landmarks[17].y - 0.5) * scale,
+      landmarks[17].z * scale
+    );
+  
+    const xAxis = new THREE.Vector3().subVectors(indexBase, pinkyBase).normalize();
+    const zAxis = new THREE.Vector3().subVectors(
+      new THREE.Vector3().addVectors(indexBase, pinkyBase).multiplyScalar(0.5),
+      wristPos
+    ).normalize();
+    const yAxis = new THREE.Vector3().crossVectors(zAxis, xAxis).normalize();
+    zAxis.crossVectors(xAxis, yAxis).normalize(); // reortogonaliza
+  
+    const rotationMatrix = new THREE.Matrix4().makeBasis(xAxis, yAxis, zAxis);
+    const baseQuaternion = new THREE.Quaternion().setFromRotationMatrix(rotationMatrix);
+  
+    // 🛠️ 4. Aplica offset de rotação (ajuste visual manual)
+    const manualEulerOffset = new THREE.Euler(
+      THREE.MathUtils.degToRad(0),  // X - inclina a palma pra baixo
+      THREE.MathUtils.degToRad(25), // Y - vira a palma pra frente
+      THREE.MathUtils.degToRad(190)   // Z - leve inclinação lateral
+    );
+    const offsetQuaternion = new THREE.Quaternion().setFromEuler(manualEulerOffset);
+  
+    // Combina a rotação automática com o offset manual
+    baseQuaternion.multiply(offsetQuaternion);
+  
+    // Aplica rotação suavizada ao modelo
+    model.quaternion.slerp(baseQuaternion, 0.6);
+
+    return
+
+ 
+    /*
+    // 🦴 5. Atualiza os bones dos dedos com rotação entre landmarks
+    for (const [i, boneName] of Object.entries(boneMap)) {
+      const index = parseInt(i);
+      const nextIndex = index + 1;
+  
+      const bone = bones[boneName];
+      if (!bone) continue;
+  
+      const point = landmarks[index];
+      const pointNext = landmarks[nextIndex] || point;
+  
+      const fromVec = new THREE.Vector3(
+        (1.0 - point.x - 0.5) * scale,
+        -(point.y - 0.5) * scale,
+        point.z * scale
+      );
+  
+      const toVec = new THREE.Vector3(
+        (1.0 - pointNext.x - 0.5) * scale,
+        -(pointNext.y - 0.5) * scale,
+        pointNext.z * scale
+      );
+  
+      const direction = new THREE.Vector3().subVectors(toVec, fromVec).normalize();
+      const up = new THREE.Vector3(0, 1, 0); // eixo padrão dos bones no Mixamo
+      const quat = new THREE.Quaternion().setFromUnitVectors(up, direction);
+      bone.quaternion.slerp(quat, 0.8);
+
+
+
+ 
+    }
+    */
+
+    // 🔁 Rotação baseada em landmarks[5] → [6]
+    const bone = bones['mixamorigLeftHandIndex1'];
+    if (bone && landmarks[5] && landmarks[6] && true) {
+        const scale = 4; // ou o que estiver sendo usado na sua função
+
+        let fromVec = new THREE.Vector3(
+            (0.5 - flipX(landmarks[5]).x) * scale,  // Flip X
+            -(landmarks[5].y - 0.5) * scale,
+            landmarks[5].z * scale
+        );
+
+
+
+        let toVec = new THREE.Vector3(
+            (0.5 - flipX(landmarks[6]).x) * scale,
+            -(landmarks[6].y - 0.5) * scale,
+            landmarks[6].z * scale
+        );
+
+        
+        
+
+      
+
+        const direction = new THREE.Vector3().subVectors(toVec, fromVec).normalize();
+        const boneUp = new THREE.Vector3(0, 1, 0); // Eixo padrão Mixamo
+
+        const rotation = new THREE.Quaternion().setFromUnitVectors(boneUp, direction);
+
+        // console.log({rotation});
+        // bone.quaternion.slerp(rotation, 0.8); // Suaviza a rotação
+
+        bone.quaternion.slerp(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3().subVectors(new THREE.Vector3(handRotationOffset.x, handRotationOffset.y, handRotationOffset.z), landmarks[6]).normalize(), direction), 0.8);
+    }
+
+ 
+      // 🔁 Rotação baseada em landmarks[5] → [6]
+      const bone8 = bones['mixamorigLeftHandIndex4'];
+      if (bone && landmarks[7] && landmarks[8] && false) {
+          const scale = 4; // ou o que estiver sendo usado na sua função
+  
+          const fromVec = new THREE.Vector3(
+              (0.5 - landmarks[7].x) * scale,  // Flip X
+              -(landmarks[7].y - 0.5) * scale,
+              landmarks[7].z * scale
+          );
+  
+          const toVec = new THREE.Vector3(
+              (0.5 - landmarks[8].x) * scale,
+              -(landmarks[8].y - 0.5) * scale,
+              landmarks[8].z * scale
+          );
+  
+          const direction = new THREE.Vector3().subVectors(toVec, fromVec).normalize();
+          const boneUp = new THREE.Vector3(0, 1, 0); // Eixo padrão Mixamo
+  
+          const rotation = new THREE.Quaternion().setFromUnitVectors(boneUp, direction);
+          bone.quaternion.slerp(rotation, 0.8); // Suaviza a rotação
+      }
+  
+    model.updateMatrixWorld(true);
+
+}
+
+function flipX(point, scale = 4) {
+    return new THREE.Vector3(
+      (0.5 - point.x) * scale,
+      -(point.y - 0.5) * scale,
+      point.z * scale
+    );
+}
+
+/**
+ * Aplica flip no eixo Y para um ponto normalizado.
+ * @param {{x: number, y: number, z: number}} point - O ponto original do MediaPipe (0 a 1)
+ * @returns {{x: number, y: number, z: number}} - Ponto com Y invertido
+ */
+function flipY(point) {
+    return {
+      x: point.x,
+      y: 1.0 - point.y,
+      z: point.z
+    };
+}
+
+function getBonesFromModel(model) {
+    const bones = {};
+
+    // model.traverse((obj) => {
+    //     if (obj.isBone) {
+    //       const label = createBoneLabel(obj.name);
+    //       obj.add(label); // anexa à posição do bone
+    //       label.position.set(0, 0.1, -1); // ajusta se necessário
+    //     }
+    // });
+
+    model.traverse((child) => {
+
+        // console.log({child});
+        
+
+        // if (child.isMesh && (child.name === 'alpha_surface' || child.name === 'alpha_joints')) {
+        //     child.visible = false;
+        // }
+
+        // if (child.isMesh) {
+        //     const name = child.name.toLowerCase();
+        //     const isHand = name.includes('Hand') || name.includes('wrist');
+        //     child.visible = isHand; // deixa visível apenas as partes da mão
+        // }
+
+        if (child.isBone) {
+            bones[child.name] = child;
+        }
+    });
+    return bones;
+}
+
 function animate() {
+    
 
     // requestAnimationFrame(animate);
     const delta = Game.clock.getDelta();
@@ -605,14 +1095,15 @@ function animate() {
     // Processa o quadro da câmera
     // processVideoFrame();
 
-    Game.renderer.render(Game.scene, Game.camera);
+    if (Game.scene && Game.camera && Game.renderer) {
+        Game.renderer.render(Game.scene, Game.camera);
+    }
+    
 }
 
-webcamEnabled();
-detectLoop();
+await bootstrap();
 
 Game.renderer.setAnimationLoop(animate);
-
 
 window.addEventListener('DOMContentLoaded', handlerKeysTouch);
 window.addEventListener('resize', handlerResize);

@@ -37,6 +37,7 @@
     }
     video {
       transform: scaleX(-1);
+      /* visibility: hidden; */
     }
 
   </style>
@@ -53,8 +54,9 @@
 
   <div>
     <video id="webcam" autoplay muted playsinline style="position: absolute; top: 0; left: 0; z-index: 0;"></video>
+    <!-- <canvas id="overlay" style="position: absolute; top: 0; left: 0; z-index: 1;border: 1px solid red;"></canvas> -->
     <canvas id="overlay" style="position: absolute; top: 0; left: 0; z-index: 1;border: 1px solid red;"></canvas>
   </div>
-  <script type="module" src="/static/modules/Game.mjs?v=1"></script>
+  <script type="module" src="/static/modules/Game.mjs?v=2"></script>
 </body>
 </html>
