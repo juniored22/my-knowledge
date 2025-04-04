@@ -23,6 +23,7 @@ let radius = 0.1;
 let frameCounter = 0;
 let handModelRight = null;
 let handBonesRight = null;
+let valorAnterior = null;
 const video = document.getElementById('webcam');
 
 const boneMapRight = {
@@ -235,6 +236,8 @@ folder.add(handRotationOffset, 'y', -180, 180).step(1).name('Y - palma');
 folder.add(handRotationOffset, 'z', -180, 180).step(1).name('Z - lateral');
 folder.open();
 
+
+
 function infoGame (){
     console.log({performance: performance.now() - performanceStart, clock: Game.clock.getDelta()});
     setTimeout(infoGame, 100);
@@ -255,7 +258,7 @@ async function webcamEnabled() {
     // Solicita a webcam
     await navigator.mediaDevices.getUserMedia({ 
         video: {
-            facingMode: "user", // Para usar a câmera frontal (se disponível)
+            facingMode: Game.divice.mobile ? "environment" : "user", // Para usar a câmera frontal (se disponível)
             width: { ideal: 640  }, // Resolução de 1280px de largura (ideal para detecção precisa)
             height: { ideal: 480 }, // Resolução de 720px de altura
             frameRate: { ideal: 30, max: 60 }, // Taxa de quadros ideal de 30fps, podendo chegar a 60fps
@@ -324,7 +327,7 @@ function createHandpointsMesh(label) {
     pointsGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
 
     // 3. Material e Objeto Points
-    const pointsMaterial = new THREE.PointsMaterial({ color: label === 'left' ? 0x0000ff : 0x00ff00 , size: 0.02, transparent: true, opacity: 0.5 });
+    const pointsMaterial = new THREE.PointsMaterial({ color: label === 'left' ? 0x0000ff : 0x00ff00 , size: 0.07, transparent: true, opacity: 0.5 });
     const pointsMesh = new THREE.Points(pointsGeometry, pointsMaterial);
 
     // ✅ Novo grupo para agrupar pontos + eixo
@@ -394,6 +397,13 @@ function updatePoints(hand, landmarks, label) {
     
     // landmarks: array de objetos com {x, y, z} em coordenadas normalizadas (0 a 1)
     const positionAttr = hand.pointsGeometry.getAttribute('position');
+
+    // let r = calcularRaio( landmarks[5], landmarks[17] );
+    // let re = escalarValor(r, 0, 0.18, 3, 6);
+    // let ri = inverterCrescimento(re, 0, 0.18);
+    // console.log({r, ri, re});
+    // const scale = re ; 
+
     const scale = 3; 
 
     // Se existirem pontos anteriores, suaviza os novos pontos
@@ -586,7 +596,7 @@ function drawPointsCanvas(landmarks, overlayCanvas, ctx, color, label) {
        
         
             // Cor para o x
-            ctx.fillStyle = 'green';        
+            ctx.fillStyle = '#33ff05';        
             ctx.fillText(xText, x, y);
             
             // Cor para o y
@@ -642,8 +652,13 @@ function drawPointsCanvas(landmarks, overlayCanvas, ctx, color, label) {
                 ctx.closePath();  // Fecha o caminho da linha
 
                 ctx.beginPath();
+                ctx.strokeStyle = 'red';
                 ctx.moveTo(areaIndex[4][0], areaIndex[4][1] );  // Posição inicial 5
                 ctx.lineTo(areaIndex[5][0], areaIndex[5][1] );  // Posição final 17
+                ctx.stroke();
+                ctx.closePath();  // Fecha o caminho da linha
+
+                ctx.beginPath();
                 ctx.moveTo(areaIndex[5][0], areaIndex[5][1] );  // Posição final 17
                 ctx.lineTo(areaIndex[0][0], areaIndex[0][1] );  // Posição final 0
 
@@ -661,6 +676,47 @@ function drawPointsCanvas(landmarks, overlayCanvas, ctx, color, label) {
                 ctx.strokeStyle = 'blue';  // Cor da linha
                 ctx.stroke();
                 ctx.closePath();  // Fecha o caminho da linha
+
+
+                // console.log(direcaoEntreVetores({x: areaIndex[1][0], y: areaIndex[1][1], z: areaIndex[1][2]}, {x: areaIndex[2][0], y: areaIndex[2][1], z: areaIndex[2][2]}));
+                // console.log(anguloEntreVetores({x: areaIndex[1][0], y: areaIndex[1][1], z: areaIndex[1][2]}, {x: areaIndex[2][0], y: areaIndex[2][1], z: areaIndex[2][2]}));
+                // console.log(distancia({x: areaIndex[1][0], y: areaIndex[1][1], z: areaIndex[1][2]}, {x: areaIndex[2][0], y: areaIndex[2][1], z: areaIndex[2][2]}));
+
+                ctx.fillStyle = 'white';
+                ctx.font = '16px Arial';
+            
+
+       
+
+                let x_ = ((areaIndex[1][0] / overlayCanvas.width)  - (areaIndex[2][0] / overlayCanvas.width)).toFixed(2);
+                let y_ = ((areaIndex[1][1] / overlayCanvas.height)  - (areaIndex[2][1] / overlayCanvas.height)).toFixed(2);
+           
+                // ctx.fillText(`${distanciaEntreVetores({
+                //         x: areaIndex[1][0] / overlayCanvas.width, 
+                //         y: areaIndex[1][1] / overlayCanvas.height, 
+                //         z:  0//(areaIndex[1][2] * overlayCanvas.height) * 1000
+                //     }, 
+                //     {
+                //         x: areaIndex[2][0] / overlayCanvas.width, 
+                //         y: areaIndex[2][1] / overlayCanvas.height, 
+                //         z: 0//(areaIndex[2][2] * overlayCanvas.height) * 1000
+                //     }) 
+                // }`, areaIndex[1][0] + 20 , areaIndex[1][1] + 20);  // Posição ajustada para o próximo valor
+
+                let t_ = tamanhoReta({x: areaIndex[4][0] , y: areaIndex[4][1] , z: 0}, {x: areaIndex[5][0] , y: areaIndex[5][1] , z: 0})
+                ctx.fillText(`${ (t_ / overlayCanvas.height).toFixed(2) }`, areaIndex[4][0] + 20 , ((areaIndex[4][1] + areaIndex[5][1]) / 2) );  // Posição ajustada para o próximo valor
+
+
+                const raio = calcularRaio( {x: areaIndex[4][0] , y: areaIndex[4][1] , z: 0}, {x: areaIndex[5][0] , y: areaIndex[5][1] , z: 0} );
+                const ang = anguloReta( {x: areaIndex[5][0] , y: areaIndex[5][1] , z: 0}, {x: areaIndex[4][0] , y: areaIndex[4][1] , z: 0} ) ; // flip angulo
+                ctx.beginPath();
+                ctx.arc(areaIndex[4][0], areaIndex[4][1], raio, 0, 2 * Math.PI);
+                ctx.font = '12px Arial';
+                ctx.fillText(`${ ang.toFixed(2) }°`, areaIndex[4][0] - 30 , areaIndex[4][1] + 20 );  // Posição ajustada para o próximo valor
+                ctx.strokeStyle = 'red';
+                ctx.stroke();
+                ctx.closePath();
+                 
             }
 
        
@@ -668,6 +724,112 @@ function drawPointsCanvas(landmarks, overlayCanvas, ctx, color, label) {
         }
   
     });
+}
+
+
+/**
+ * Calcula o ângulo (em graus) da reta formada por dois pontos 2D
+ * @param {{x: number, y: number}} p1 - ponto de origem
+ * @param {{x: number, y: number}} p2 - ponto de destino
+ * @returns {number} Ângulo em graus
+ */
+function anguloReta(p1, p2) {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const rad = Math.atan2(dy, dx); // ângulo em radianos  [-π, π]
+    const deg = rad * (180 / Math.PI); // convertendo para graus
+    return deg;
+  }
+
+  // Função que calcula o comprimento da reta (raio)
+  function calcularRaio(p1, p2) {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    return Math.sqrt(dx * dx + dy * dy);
+  }
+
+/**
+ * Calcula o comprimento de uma reta entre dois pontos (2D ou 3D)
+ * @param {{x: number, y: number, z?: number}} p1 - ponto inicial
+ * @param {{x: number, y: number, z?: number}} p2 - ponto final
+ * @returns {number} Comprimento da reta
+ */
+function tamanhoReta(p1, p2) {
+    const dx = p2.x - p1.x;
+    const dy = p2.y - p1.y;
+    const dz = (p2.z || 0) - (p1.z || 0); // caso não tenha z, assume 0
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+/**
+ * Calcula o tamanho (magnitude) de um vetor 3D
+ * @param {{x: number, y: number, z: number}} v
+ * @returns {number} Tamanho (norma) do vetor
+ */
+function tamanhoVetor(v) {
+    return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+}
+
+
+/**
+ * Calcula a distância entre dois vetores 3D (pontos no espaço)
+ * @param {{x: number, y: number, z: number}} v1
+ * @param {{x: number, y: number, z: number}} v2
+ * @returns {number} Distância entre v1 e v2
+ */
+function distanciaEntreVetores(v1, v2) {
+    const dx = v2.x - v1.x;
+    const dy = v2.y - v1.y;
+    const dz = v2.z - v1.z;
+    return Math.sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+/**
+ * Calcula o vetor direção entre dois pontos no espaço 3D
+ * @param {{x: number, y: number, z: number}} v1 - Vetor de origem
+ * @param {{x: number, y: number, z: number}} v2 - Vetor de destino
+ * @returns {{x: number, y: number, z: number}} - Vetor direção normalizado
+ */
+function direcaoEntreVetores(v1, v2) {
+    const dx = v2.x - v1.x;
+    const dy = v2.y - v1.y;
+    const dz = v2.z - v1.z;
+    const magnitude = Math.sqrt(dx * dx + dy * dy + dz * dz);
+  
+    return {
+      x: dx / magnitude,
+      y: dy / magnitude,
+      z: dz / magnitude
+    };
+}
+  
+  
+/**
+ * Calcula o ângulo (em radianos) entre dois vetores 3D
+ * @param {{x: number, y: number, z: number}} v1
+ * @param {{x: number, y: number, z: number}} v2
+ * @returns {number} Ângulo em radianos
+ */
+function anguloEntreVetores(v1, v2) {
+    const dot = v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;
+    const mag1 = Math.sqrt(v1.x**2 + v1.y**2 + v1.z**2);
+    const mag2 = Math.sqrt(v2.x**2 + v2.y**2 + v2.z**2);
+
+    return Math.acos(dot / (mag1 * mag2)); // resultado em radianos
+}
+
+/**
+ * Calcula o produto vetorial entre dois vetores 3D
+ * @param {{x: number, y: number, z: number}} v1
+ * @param {{x: number, y: number, z: number}} v2
+ * @returns {{x: number, y: number, z: number}} Vetor perpendicular (sentido)
+ */
+function produtoVetorial(v1, v2) {
+    return {
+        x: v1.y * v2.z - v1.z * v2.y,
+        y: v1.z * v2.x - v1.x * v2.z,
+        z: v1.x * v2.y - v1.y * v2.x
+    };
 }
 
 // Função para formatar as coordenadas X, Y, Z
@@ -815,6 +977,9 @@ function uploadGLTF(event){
         );
         const axesHelper = new THREE.AxesHelper(1);
         handModel.add(axesHelper);
+          // 👉 Adiciona na cena (visualmente)
+        // Game.scene.add(handModel);
+
         // Rotaciona se estiver de costas
         // handModel.rotation.y = Math.PI; // Gira 180° se estiver de costas
 
@@ -830,12 +995,17 @@ function uploadGLTF(event){
             }
         });
 
+
+
+
         const bones = getBonesFromModel(handModel);
         Game.players[0].mesh.hands.model = handModel;
         Game.players[0].mesh.hands.bones = bones;
 
         // const helper = new THREE.AxesHelper(0.2);
         // Game.players[0].mesh.hands.model.add(helper);
+
+
       
 
     }, undefined, (error) => {
@@ -844,6 +1014,31 @@ function uploadGLTF(event){
 
 
     
+}
+
+/**
+ * Inverte valor dentro do intervalo de 0 a 10
+ * @param {number} valorAtual - valor de 0 a 10
+ * @returns {number} valor invertido (espelhado)
+ */
+function inverterCrescimento(valorAtual, min = 0, max = 0.20) {
+
+    if(valorAtual == min) return 0;
+    return max - (valorAtual - min);
+}
+
+  /**
+ * Escala um valor de um intervalo para outro
+ * @param {number} valor - o valor que será escalado
+ * @param {number} deMin - valor mínimo original
+ * @param {number} deMax - valor máximo original
+ * @param {number} paraMin - valor mínimo do novo intervalo
+ * @param {number} paraMax - valor máximo do novo intervalo
+ * @returns {number} valor escalado para o novo intervalo
+ */
+function escalarValor(valor, deMin, deMax, paraMin, paraMax) {
+    const proporcao = (valor - deMin) / (deMax - deMin);
+    return paraMin + proporcao * (paraMax - paraMin);
 }
 
 function updateHandSkeletonFromLandmarks(bones, landmarks, model, boneMap = boneMapRight, scale = 4) {
@@ -855,8 +1050,8 @@ function updateHandSkeletonFromLandmarks(bones, landmarks, model, boneMap = bone
         window._loopDebugger1 = true;
         DEBUGGER && console.log("[updateHandSkeletonFromLandmarks]", handBonesRight);
     }
+
     
-        
     // 🟢 1. Base: posição do pulso (landmark 0)
     const wrist = landmarks[0];
     const wristPos = new THREE.Vector3(
@@ -864,6 +1059,9 @@ function updateHandSkeletonFromLandmarks(bones, landmarks, model, boneMap = bone
       -(wrist.y - 0.5) * scale,
       wrist.z * scale
     );
+
+
+    
   
     // 🔧 2. Aplica offset de posição (para ajustar onde a mão aparece na cena)
     const positionOffset = new THREE.Vector3(0, 0, -2.0); // ajuste fino para visão em 1ª pessoa
@@ -871,24 +1069,27 @@ function updateHandSkeletonFromLandmarks(bones, landmarks, model, boneMap = bone
     model.position.copy(adjustedPos);
 
 
+    // let s = calcularRaio( landmarks[5], landmarks[17] );
+    // let i = inverterCrescimento(s);
+    // s = escalarValor(i, 0,0.10, 6, 9);
+    // console.log({s, i});
+    // model.scale.set(s, s, s);
 
 
-
-   
-  
+    
     // 🔄 3. Calcula rotação automática com base nos landmarks da palma
     const indexBase = new THREE.Vector3(
       (1.0 - landmarks[5].x - 0.5) * scale,
       -(landmarks[5].y - 0.5) * scale,
       landmarks[5].z * scale
     );
-  
+
     const pinkyBase = new THREE.Vector3(
       (1.0 - landmarks[17].x - 0.5) * scale,
       -(landmarks[17].y - 0.5) * scale,
       landmarks[17].z * scale
     );
-  
+
     const xAxis = new THREE.Vector3().subVectors(indexBase, pinkyBase).normalize();
     const zAxis = new THREE.Vector3().subVectors(
       new THREE.Vector3().addVectors(indexBase, pinkyBase).multiplyScalar(0.5),
@@ -913,9 +1114,9 @@ function updateHandSkeletonFromLandmarks(bones, landmarks, model, boneMap = bone
   
     // Aplica rotação suavizada ao modelo
     model.quaternion.slerp(baseQuaternion, 0.6);
+    
 
-    return
-
+  
  
     /*
     // 🦴 5. Atualiza os bones dos dedos com rotação entre landmarks
@@ -958,36 +1159,45 @@ function updateHandSkeletonFromLandmarks(bones, landmarks, model, boneMap = bone
         const scale = 4; // ou o que estiver sendo usado na sua função
 
         let fromVec = new THREE.Vector3(
-            (0.5 - flipX(landmarks[5]).x) * scale,  // Flip X
-            -(landmarks[5].y - 0.5) * scale,
-            landmarks[5].z * scale
+            (0.5 - flipX(landmarks[0]).x) * scale,  // Flip X
+            -(landmarks[0].y - 0.5) * scale,
+            landmarks[0].z * scale
         );
 
 
 
         let toVec = new THREE.Vector3(
-            (0.5 - flipX(landmarks[6]).x) * scale,
-            -(landmarks[6].y - 0.5) * scale,
-            landmarks[6].z * scale
+            (0.5 - flipX(landmarks[8]).x) * scale,
+            -(landmarks[8].y - 0.5) * scale,
+            landmarks[8].z * scale
         );
 
+        // console.log({wrist: `x:${fromVec.x.toFixed(2)} y:${fromVec.y.toFixed(2)} z:${fromVec.z.toFixed(8)} -x:${toVec.x.toFixed(2)} y:${toVec.y.toFixed(2)} z:${toVec.z.toFixed(8)} - `});
+        // console.log(`dis: ${ (distancia(fromVec, toVec).toFixed(2) )  }, ${Math.sin(Date.now() * 0.001) * 0.4}`);
+        // console.log(`dis: ${distancia(fromVec, toVec)}`);
         
-        
+        if(distancia(fromVec, toVec) < 1.5){
+            bone.rotation.x = 2;//Math.sin(Date.now() * 0.001) * 0.4; 
+        }else{
+            bone.rotation.x = 0;
+        }
+       
 
       
 
-        const direction = new THREE.Vector3().subVectors(toVec, fromVec).normalize();
-        const boneUp = new THREE.Vector3(0, 1, 0); // Eixo padrão Mixamo
+        // const direction = new THREE.Vector3().subVectors(toVec, fromVec).normalize();
+        // const boneUp = new THREE.Vector3(0, 1, 0); // Eixo padrão Mixamo
 
-        const rotation = new THREE.Quaternion().setFromUnitVectors(boneUp, direction);
+        // const rotation = new THREE.Quaternion().setFromUnitVectors(boneUp, direction);
 
-        // console.log({rotation});
-        // bone.quaternion.slerp(rotation, 0.8); // Suaviza a rotação
+        // // console.log({rotation});
+        // // bone.quaternion.slerp(rotation, 0.8); // Suaviza a rotação
 
-        bone.quaternion.slerp(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3().subVectors(new THREE.Vector3(handRotationOffset.x, handRotationOffset.y, handRotationOffset.z), landmarks[6]).normalize(), direction), 0.8);
+        // bone.quaternion.slerp(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3().subVectors(new THREE.Vector3(handRotationOffset.x, handRotationOffset.y, handRotationOffset.z), landmarks[6]).normalize(), direction), 0.8);
     }
 
  
+    return
       // 🔁 Rotação baseada em landmarks[5] → [6]
       const bone8 = bones['mixamorigLeftHandIndex4'];
       if (bone && landmarks[7] && landmarks[8] && false) {
@@ -1015,6 +1225,42 @@ function updateHandSkeletonFromLandmarks(bones, landmarks, model, boneMap = bone
     model.updateMatrixWorld(true);
 
 }
+
+/**
+ * Calcula a distância Euclidiana entre dois vetores 3D.
+ * @param {{x: number, y: number, z: number}} a 
+ * @param {{x: number, y: number, z: number}} b 
+ * @returns {number}
+ * @example
+ * const a = {x: 1, y: 2, z: 0};
+ * const b = {x: 4, y: 6, z: 3};
+ * console.log(distancia(a, b)); // ~5.830
+ */
+function distancia(a, b) {
+    let soma = 0;
+    for (const chave in a) {
+      if (b.hasOwnProperty(chave)) {
+        const diff = a[chave] - b[chave];
+        soma += diff * diff;
+      }
+    }
+    return Math.sqrt(soma);
+}
+
+/**
+ * Mapeia um valor de um intervalo para outro.
+ * @param {number} valor - Valor original.
+ * @param {number} deMin - Mínimo do intervalo original.
+ * @param {number} deMax - Máximo do intervalo original.
+ * @param {number} paraMin - Mínimo do novo intervalo.
+ * @param {number} paraMax - Máximo do novo intervalo.
+ * @returns {number} - Valor mapeado.
+ * @example
+ * const resultado = remapear(0.35, 0.35, 0.40, -0.3, 2); // -0.3
+ */
+function remapear(valor, deMin, deMax, paraMin, paraMax) {
+    return ((valor - deMin) * (paraMax - paraMin)) / (deMax - deMin) + paraMin;
+  }
 
 function flipX(point, scale = 4) {
     return new THREE.Vector3(
