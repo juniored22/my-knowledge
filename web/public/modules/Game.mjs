@@ -1,11 +1,10 @@
-import * as THREE from 'https://esm.sh/three';
-import { VRButton } from 'https://esm.sh/three/examples/jsm/webxr/VRButton';
-import { GLTFLoader } from 'https://esm.sh/three/examples/jsm/loaders/GLTFLoader';
+import * as THREE                       from 'https://esm.sh/three';
+import * as dat                         from 'https://esm.sh/dat.gui';
+import { VRButton }                     from 'https://esm.sh/three/examples/jsm/webxr/VRButton';
+import { GLTFLoader }                   from 'https://esm.sh/three/examples/jsm/loaders/GLTFLoader';
 import { PointerLockControls }          from 'https://esm.sh/three/examples/jsm/controls/PointerLockControls';
 import { DeviceOrientationControls }    from '/static/modules/DeviceOrientationControls.mjs';
-import * as dat from 'https://esm.sh/dat.gui';
-import vision from "/libs/@mediapipe/tasks-vision/vision_bundle.mjs";
-// import vision from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0";
+import vision                           from "/libs/@mediapipe/tasks-vision/vision_bundle.mjs"; //https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0
 
 const DEBUGGER = true;
 
@@ -13,6 +12,8 @@ const { HandLandmarker , FilesetResolver, DrawingUtils } = vision;
 const performanceStart = performance.now(); 
 const overlayCanvas = document.getElementById('overlay');
 const ctx = overlayCanvas.getContext('2d');
+const preproceImage = document.getElementById('preprocessed');
+const ctxPreproceImage = preproceImage.getContext('2d');
 
 let handLandmarker = null;
 let latestResults = null;
@@ -24,6 +25,8 @@ let frameCounter = 0;
 let handModelRight = null;
 let handBonesRight = null;
 let valorAnterior = null;
+let lastTime = performance.now();
+let fps = 0;
 const video = document.getElementById('webcam');
 
 const boneMapRight = {
@@ -48,7 +51,31 @@ const boneMapRight = {
    18: 'mixamorigRightHandPinky2',
    19: 'mixamorigRightHandPinky3',
    20: 'mixamorigRightHandPinky4',
-  };
+};
+
+const boneMapLeft = {
+    0: 'mixamorigLeftHand',
+    1: 'mixamorigLeftHandThumb1',
+    2: 'mixamorigLeftHandThumb2',
+    3: 'mixamorigLeftHandThumb3',
+    4: 'mixamorigLeftHandThumb4',
+    5: 'mixamorigLeftHandIndex1',    
+    6: 'mixamorigLeftHandIndex2',
+    7: 'mixamorigLefttHandIndex3',
+    8: 'mixamorigLeftHandIndex4',
+    9: 'mixamorigLeftHandMiddle1',
+   10: 'mixamorigLeftHandMiddle2',
+   11: 'mixamorigLeftHandMiddle3',
+   12: 'mixamorigLeftHandMiddle4',
+   13: 'mixamorigLeftHandRing1',
+   14: 'mixamorigLeftHandRing2',
+   15: 'mixamorigLeftHandRing3',
+   16: 'mixamorigLeftHandRing4',
+   17: 'mixamorigLeftHandPinky1',
+   18: 'mixamorigLeftHandPinky2',
+   19: 'mixamorigLeftHandPinky3',
+   20: 'mixamorigLeftHandPinky4',
+}
 
 const handConnections = [
     [0, 1], [1, 2], [2, 3], [3, 4],
@@ -91,6 +118,10 @@ window.Game = {
                         bones : {},
                         model : null
                     },
+                    model : {
+                        left: null,
+                        right: null
+                    }
                 }
             }
         }
@@ -121,10 +152,14 @@ Game.renderer.xr.enabled = true;
 Game.objAmbientLight.directionalLight.position.set(10, 10, 10);
 Game.camera.lookAt(0, 0, 0);
 
-Game.scene.add(new THREE.GridHelper( 200, 200 ));
+
+const gridHelper = new THREE.GridHelper( 200, 200 );
+Game.scene.add(gridHelper);
+gridHelper.position.set(0, -4, 0);
 
 const cameraHelper = new THREE.CameraHelper( Game.camera );
 Game.scene.add( cameraHelper );
+
 
 if (Game.divice.mobile) {
     Game.controlsMobile = new DeviceOrientationControls(Game.camera);
@@ -133,7 +168,7 @@ if (Game.divice.mobile) {
     Game.controls = new PointerLockControls(Game.camera, document.body);
 }
 
-Game.controls.object.position.set(0, 1.8, 3);
+// Game.controls.object.position.set(0, 4, 3);
 
 async function requestDeviceOrientationPermission() {
     if (typeof Game.controlsMobile !== 'undefined' && typeof Game.controlsMobile.requestPermission === 'function') {
@@ -183,7 +218,7 @@ Game.scene.add(Game.controls.object);
 
 // Chão
 Game.level.floor.rotation.x = -Math.PI / 2;
-Game.level.floor.position.y = -1;
+Game.level.floor.position.y = -4;
 Game.scene.add(Game.level.floor);
 
 // Mãos
@@ -203,10 +238,9 @@ const cubeSize = 1;
 const physicsCube = new THREE.Mesh(
     new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize),
     new THREE.MeshStandardMaterial({ color: 0xff4444 }));
-physicsCube.position.set(0, 0.5, 0);
+physicsCube.position.set(0, 0.5, -4);
 physicsCube.add(new THREE.AxesHelper(1));
 Game.scene.add(physicsCube);
-
 
 const cubeVelocity = new THREE.Vector3();
 const keys = {};
@@ -214,7 +248,6 @@ const vVelocity = new THREE.Vector3();
 
 document.addEventListener('keydown', e => keys[e.code] = true);
 document.addEventListener('keyup', e => keys[e.code] = false);
-
 
 const geometry = new THREE.BoxGeometry( 1, 1, 1 ); 
 const material = new THREE.MeshBasicMaterial( {color: 0x00ff00} ); 
@@ -227,15 +260,14 @@ cube.position.set(10, 0.5, 0);
 cube.add(new THREE.AxesHelper(1));
 // cube.add(new THREE.PolarGridHelper( 10, 16, 6, 64 ));
 
-
-  
-const gui = new dat.GUI();
-const folder = gui.addFolder('Hand Rotation Offset');
-folder.add(handRotationOffset, 'x', -180, 180).step(1).name('X - inclinação');
-folder.add(handRotationOffset, 'y', -180, 180).step(1).name('Y - palma');
-folder.add(handRotationOffset, 'z', -180, 180).step(1).name('Z - lateral');
-folder.open();
-
+if(!Game.divice.mobile){
+    const gui = new dat.GUI();
+    const folder = gui.addFolder('Hand Rotation Offset');
+    folder.add(handRotationOffset, 'x', -180, 180).step(1).name('X - inclinação');
+    folder.add(handRotationOffset, 'y', -180, 180).step(1).name('Y - palma');
+    folder.add(handRotationOffset, 'z', -180, 180).step(1).name('Z - lateral');
+    folder.open();
+}
 
 
 function infoGame (){
@@ -243,48 +275,94 @@ function infoGame (){
     setTimeout(infoGame, 100);
 }
 
-async function webcamEnabled() {
+/**
+ * Habilita a webcam e conecta o stream ao elemento de vídeo.
+ * 
+ * @param {HTMLVideoElement} video - Elemento <video> onde o stream será exibido.
+ * @param {HTMLCanvasElement} overlayCanvas - Canvas usado como sobreposição (opcional).
+ * @param {Function} callbackLoadedData - Função callback chamada quando os dados do vídeo estiverem prontos.
+ * @param {Object} [options={}] - Configurações opcionais.
+ * @param {boolean} [options.autoplay=true] - Define se o vídeo deve começar automaticamente.
+ * @param {boolean} [options.muted=true] - Define se o vídeo deve estar mudo.
+ * @param {boolean} [options.playsInline=true] - Suporte a reprodução inline em dispositivos móveis.
+ * @param {boolean} [options.mobile=navigator.userAgent.includes("Mobi")] - Define se o dispositivo é mobile.
+ * @param {number} [options.deviceWidth=640] - Largura ideal da câmera.
+ * @param {number} [options.deviceHeight=480] - Altura ideal da câmera.
+ * @param {Object} [options.frameRate={min:30, max:60}] - Taxa de quadros.
+ */
+async function webcamEnabled(video, overlayCanvas, callbackLoadedData, {autoplay = true, muted = true, playsInline = true, mobile = /Mobi|Android/i.test(navigator.userAgent), deviceWidth = 640, deviceHeight = 480, frameRate = {min:30, max:60}, flipVideo = true} = {}) {
     DEBUGGER && console.log("[webcamEnabled]");
     
-    video.autoplay = true;
-    video.muted = true;
-    video.playsInline = true;
-
-    if (!overlayCanvas) {
-        alert("Canvas não encontrado!");
+    if (!video || !(video instanceof HTMLVideoElement)) {
+        console.warn("Elemento <video> inválido ou não fornecido.");
+        return;
+    }
+    
+    if (!overlayCanvas || !(overlayCanvas instanceof HTMLCanvasElement)) {
+        console.warn("Elemento <canvas> inválido ou não fornecido.");
         return;
     }
 
-    // Solicita a webcam
-    await navigator.mediaDevices.getUserMedia({ 
-        video: {
-            facingMode: Game.divice.mobile ? "environment" : "user", // Para usar a câmera frontal (se disponível)
-            width: { ideal: 640  }, // Resolução de 1280px de largura (ideal para detecção precisa)
-            height: { ideal: 480 }, // Resolução de 720px de altura
-            frameRate: { ideal: 30, max: 60 }, // Taxa de quadros ideal de 30fps, podendo chegar a 60fps
-        }
-     }).then((stream) => {
-        video.srcObject = stream;
-        video.play();
-        
-        // Verifica se o vídeo foi carregado antes de iniciar o HandLandmarker
-        video.addEventListener('loadeddata', () => {
-            console.log('Webcam carregada');
-            initHandLandmarker().then( ()=>{
-                detectLoop().then( uploadGLTF );
-            }); // Inicializa o HandLandmarker após o vídeo ser carregado
-        });
-      
-    });
+    Object.assign(video, { autoplay, muted, playsInline });
 
+    video.style.transform = flipVideo && !mobile? 'scaleX(-1)' : 'scaleX(1)';
+
+    if(mobile){
+        // video.style.visibility = 'hidden'; 
+        // overlayCanvas.style.visibility = 'visible';
+    }
+
+    try {
+
+        const constraints = {
+          video: {
+            facingMode: mobile ? "environment" : "user",
+            width: { ideal: mobile ? 128 : deviceWidth },
+            height: { ideal: mobile ? 128 : deviceHeight },
+            frameRate: { ideal: frameRate.min, max: frameRate.max },
+          },
+        };
+    
+        const stream = await navigator.mediaDevices.getUserMedia(constraints);
+        video.srcObject = stream;
+    
+        video.addEventListener("loadeddata", () => {
+          console.log("Webcam carregada com sucesso.");
+          if (typeof callbackLoadedData === "function") callbackLoadedData();
+        });
+    
+        await video.play();
+    } catch (error) {
+        console.error("Erro ao acessar a webcam:", error);
+        alert("Não foi possível acessar a câmera. Verifique as permissões.");
+    }
 }
 
 async function bootstrap() {
     DEBUGGER && console.log("[bootstrap]");
-    webcamEnabled().then( ()=>{
+
+    const callbackLoadedData = async () => {
+        initHandLandmarker().then( ()=>{
+            detectLoop()
+        });
+    }   
+
+    webcamEnabled(video, overlayCanvas, callbackLoadedData).then( async () => {
+        
+        await uploadGLTF('RightHand_CV.glb', (model)=>{
+            model.handModel.position.x = -model.handModel.position.x;
+            Game.players[0].mesh.hands.model.right = model;
+            console.log({right: Game.players[0].mesh.hands.model.right});
+        });
+
+        await uploadGLTF('LeftHand_CV.glb', (model)=>{
+            Game.players[0].mesh.hands.model.left = model
+        });
+   
+    }).then( () => {
         Game.players[0].mesh.hands.right = createHandpointsMesh('right');
         Game.players[0].mesh.hands.left = createHandpointsMesh('left');
-    } );
+    })
 }
 
 async function initHandLandmarker(){
@@ -299,7 +377,6 @@ async function initHandLandmarker(){
 
     handLandmarker = await HandLandmarker.createFromOptions(filesetResolver, {
         baseOptions: {
-        //  modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
             modelAssetPath: "/libs/@mediapipe/tasks-vision/hand_landmarker.task",
             delegate: "GPU"
         },
@@ -310,7 +387,6 @@ async function initHandLandmarker(){
         runningMode: "VIDEO",
         numHands: 2
     });
-  
 }
 
 function createHandpointsMesh(label) {
@@ -378,7 +454,7 @@ function createHandpointsMesh(label) {
 }
 
 // Função para suavizar os pontos usando interpolação exponencial
-function smoothPoints(prevPoints, currPoints, alpha = 0.5) {
+function smoothPoints(prevPoints, currPoints, alpha = 0.0) {
     return currPoints.map((point, idx) => {
       if (prevPoints && prevPoints[idx]) {
         return {
@@ -396,7 +472,9 @@ function updatePoints(hand, landmarks, label) {
 
     
     // landmarks: array de objetos com {x, y, z} em coordenadas normalizadas (0 a 1)
-    const positionAttr = hand.pointsGeometry.getAttribute('position');
+    const positionAttr = hand?.pointsGeometry?.getAttribute('position') || null;
+
+    if (!positionAttr) return;
 
     // let r = calcularRaio( landmarks[5], landmarks[17] );
     // let re = escalarValor(r, 0, 0.18, 3, 6);
@@ -431,7 +509,7 @@ function updatePoints(hand, landmarks, label) {
         let x = (smoothLandmarks[i].x - 0.5) * scale;  // de 0-1 para -1 a 1
         let y = -(smoothLandmarks[i].y - 0.5) * scale; // inverte o eixo y
         let z = smoothLandmarks[i].z * scale;
-        x = -x; // Inverte a coordenada X para o efeito desejado
+        !(/Mobi|Android/i.test(navigator.userAgent)) ? x = -x : null; // Inverte a coordenada X para o efeito desejado
 
         positionAttr.array[i * 3]     = x;
         positionAttr.array[i * 3 + 1] = y;
@@ -446,26 +524,41 @@ function updatePoints(hand, landmarks, label) {
     
 
     // Atualiza SkinnedMesh (se houver bones associados)
-    if (Game.players[0].mesh.hands.bones && label === "Right") {
+    if (Game.players[0].mesh.hands.model.right.bones && label === "Right" && true) {
 
-        updateHandSkeletonFromLandmarks(Game.players[0].mesh.hands.bones, smoothLandmarks, Game.players[0].mesh.hands.model);
+        // updateHandSkeletonFromLandmarks(Game.players[0].mesh.hands.model.right.bones, smoothLandmarks, Game.players[0].mesh.hands.model.right);
     }
     
     
 }
 
 // Função para atualizar a posição das mãos
-function updateHandPosition(handMesh, landmarks, results, radius) {
+function updateHandPosition(handMesh, landmarks, results, radius, handIndex) {
+
+ 
     // Mapeando as coordenadas normalizadas (0-1) para o sistema de coordenadas 3D do Three.js
     const wrist = landmarks[0]; // Ponto do pulso, por exemplo
-
     // Normalizando para o espaço de coordenadas 3D do Three.js (ajustando conforme necessário)
-    let x = wrist.x * 2 - 1; // Convertendo de 0-1 para -1 a 1 (para o eixo X)
-    const y = -(wrist.y * 2 - 1); // Convertendo de 0-1 para -1 a 1 (para o eixo Y) e invertendo para ajustar a direção
-    let z = (wrist.z * radius - 1); // Ajustando a profundidade (z) dependendo do modelo, mas pode ser necessário um ajuste adicional
+    let x =  wrist.x * 2 - 1; // Convertendo de 0-1 para -1 a 1 (para o eixo X)
+    let y = -(wrist.y * 2 - 1); // Convertendo de 0-1 para -1 a 1 (para o eixo Y) e invertendo para ajustar a direção
+    let z =  (wrist.z * radius - 1); // Ajustando a profundidade (z) dependendo do modelo, mas pode ser necessário um ajuste adicional
     // Aplica o flip horizontal diretamente na coordenada x
-    x = -x; // Inverte a coordenada X (flip)
-    z = z * 1;
+    !(/Mobi|Android/i.test(navigator.userAgent)) ? x = -x : null; // Inverte a coordenada X (flip)
+    !(/Mobi|Android/i.test(navigator.userAgent)) ? z = z * 1 : null; // Inverte a coordenada Z (flip)
+    
+
+    if(!Game.players[0].mesh.hands?.model?.right?.bones ) return;
+
+   if(handIndex == 0){
+    Game.players[0].mesh.hands.model.right.handModel.position.x = x;// Game.divice.mobile ? (landmarks[0].x * 2 - 1) :-(landmarks[0].x * 2 - 1);
+    Game.players[0].mesh.hands.model.right.handModel.position.y = y; // Game.divice.mobile ? -(landmarks[0].y * 2 - 1) :-(landmarks[0].y * 2 - 1);
+   }else{
+    Game.players[0].mesh.hands.model.left.handModel.position.x = x; // Game.divice.mobile ? (landmarks[0].x * 2 - 1) :-(landmarks[0].x * 2 - 1);
+    Game.players[0].mesh.hands.model.left.handModel.position.y = y; // Game.divice.mobile ? -(landmarks[0].y * 2 - 1) :-(landmarks[0].y * 2 - 1);
+
+   }
+   
+    // console.log('»»»»',Game.players[0].mesh.hands.model.right.bones[9].position.x);
 
     if (results && results.landmarks && results.handednesses.length > 0) {
         // Atualiza cada mão detectada
@@ -474,13 +567,13 @@ function updateHandPosition(handMesh, landmarks, results, radius) {
             const origem = {x:0, y:0, z:-1.5};
             if (label === "Left") {
                 const handObj = Game.players[0].mesh.hands.left;
-                handObj.pointsMesh.position.set(origem.x, origem.y, origem.z);
+                handObj.pointsMesh?.position.set(origem.x, origem.y, origem.z);
                 updatePoints(handObj, landmarks, label);
                 // updateEdges(handObj, landmarks);
             
             } else if (label === "Right") {
                 const handObj = Game.players[0].mesh.hands.right;
-                handObj.pointsMesh.position.set(origem.x, origem.y, origem.z);
+                handObj.pointsMesh?.position.set(origem.x, origem.y, origem.z);
                 updatePoints(handObj, landmarks, label);
                 // updateEdges(handObj, landmarks);
             }
@@ -492,6 +585,22 @@ function updateHandPosition(handMesh, landmarks, results, radius) {
 }
   
 async function detectLoop() {
+
+
+    if (!video || !(video instanceof HTMLVideoElement)) {
+        console.warn("Elemento <video> inválido ou não fornecido.");
+        return;
+    }
+    
+    if (!overlayCanvas || !(overlayCanvas instanceof HTMLCanvasElement)) {
+        console.warn("Elemento <canvas> inválido ou não fornecido.");
+        return;
+    }
+
+    if (!handLandmarker) {
+        console.warn("HandLandmarker inválido ou não fornecido.");
+        return;
+    }
 
     if(typeof _loopDebugger0 == 'undefined'){
         window._loopDebugger0 = true;
@@ -515,44 +624,129 @@ async function detectLoop() {
 
         // Agora desenha os landmarks com a rotação aplicada ao canvas
         if (results.landmarks && results.landmarks.length > 0) {
-
+      
+            
             Game.players[0].resultDetectForVideo = results;
 
+            
+            // console.log(results.handednesses[0][0].categoryName);
+        
             results.landmarks.forEach((landmarks, i) => {
                 const handLabel = results.handednesses?.[i]?.[0]?.categoryName || "Unknown";
                 const handIndex = results.handednesses?.[i]?.[0]?.index || 0;
                 const color = handLabel === "Left" ? "blue" : "green";
 
-                drawPointsCanvas(landmarks, overlayCanvas, ctx, color, handLabel);
+                // console.log(results.handednesses[i][0]?.categoryName);
+                
 
-                if(handLabel === "Left") {
-                    updateHandPosition(Game.players[0].mesh.rightHand, landmarks, results, radius);
-                }
+                drawPointsCanvas(landmarks, overlayCanvas, ctx, color, handLabel, handIndex, results);
+                updateHandPosition(Game.players[0].mesh.rightHand, landmarks, results, radius, handIndex);
+             
+                // if(handIndex === 1) {
+                //     updateHandPosition(Game.players[0].mesh.rightHand, landmarks, results, radius);
+                // }
 
-                if(handLabel === "Right") {
-                    updateHandPosition(Game.players[0].mesh.leftHand, landmarks, results, radius);
-                }
+                // if(handIndex === 0) {
+                //     updateHandPosition(Game.players[0].mesh.leftHand, landmarks, results, radius);
+                // }
                 
             });
         }    
     }
+
+    // preprocessFrame();
     
 }
 
-function drawPointsCanvas(landmarks, overlayCanvas, ctx, color, label) {
+// Pré-processamento do frame da webcam
+async   function preprocessFrame() {
+    ctxPreproceImage.save();
+    ctxPreproceImage.scale(-1, 1); // espelhamento horizontal
+    ctxPreproceImage.filter = 'blur(1px) contrast(110%) brightness(105%)';
+    ctxPreproceImage.drawImage(video, -preproceImage.width, 0, preproceImage.width, preproceImage.height);
+    ctxPreproceImage.filter = 'none';
+    ctxPreproceImage.restore();
+
+    // Ajuste de brilho e contraste
+    const imageData = ctxPreproceImage.getImageData(0, 0, preproceImage.width, preproceImage.height);
+    const data = imageData.data;
+
+    const contrast = 1.1; // contraste leve
+    const brightness = 15; // brilho leve
+
+    for (let i = 0; i < data.length; i += 4) {
+      for (let j = 0; j < 3; j++) {
+        let val = data[i + j];
+        val = val * contrast + brightness;
+        data[i + j] = Math.max(0, Math.min(255, val));
+      }
+    }
+
+    ctxPreproceImage.putImageData(imageData, 0, 0);
+}
+
+function drawPointsCanvas(landmarks, overlayCanvas, ctx, color, handLabel, handIndex, results) {
+
+    if(!ctx){
+        console.error("Canvas context inválido ou não fornecido.");
+        return;
+    }
+
+    let filterLabel = handLabel === "Left" ? 20 : 1;
+    ctx.fillStyle = 'red';
+    ctx.fillText(`canvas`, 10, 10);  // Posição ajustada para o próximo valor
+    ctx.fillText(`${overlayCanvas.width}x${overlayCanvas.height}`, overlayCanvas.width - 50, overlayCanvas.height - 10);
+   
     let arrayIndexOrder = [0, 4,  8,  20, 5, 17];
     let areaIndex = [];
+
+    const xs = landmarks.map(p => /Mobi|Android/i.test(navigator.userAgent) ? p.x  : 1 - p.x ); // flip horizontal
+    const ys = landmarks.map(p => /Mobi|Android/i.test(navigator.userAgent) ? p.y  : 1 - p.y ); // flip vertical
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+
+    ctx.fillStyle = 'white';
+    ctx.fillRect(10 * filterLabel, overlayCanvas.height - 19, 180, 11);
+    ctx.fillStyle = 'black';
+    ctx.fillText(` max:(${maxX.toFixed(2)}, ${maxY.toFixed(2)}) min:(${minX.toFixed(2)}, ${minY.toFixed(2)}) * ${1 - handIndex}`, 10 * filterLabel , overlayCanvas.height - 10);
+
+    ctx.fillStyle = 'white';
+    ctx.fillRect(maxX * overlayCanvas.width, (/Mobi|Android/i.test(navigator.userAgent) ? maxY : 1 - maxY) * overlayCanvas.height, 10, 10);
+    ctx.fillRect(minX * overlayCanvas.width, (/Mobi|Android/i.test(navigator.userAgent) ? minY : 1 - minY) * overlayCanvas.height, 10, 10);
+    ctx.fillStyle = 'black';
+    ctx.fillText(` ⇗`, maxX * overlayCanvas.width - 1.5 , (/Mobi|Android/i.test(navigator.userAgent) ? maxY : 1 - maxY) * overlayCanvas.height + 8.5);
+    ctx.fillText(` ⇙`, minX * overlayCanvas.width - 1.5 , (/Mobi|Android/i.test(navigator.userAgent) ? minY : 1 - minY) * overlayCanvas.height + 8.5);
+    
+    ctx.fillText(`* ${1 - handIndex}`, (/Mobi|Android/i.test(navigator.userAgent) ? landmarks[0].x : 1 - landmarks[0].x)  * overlayCanvas.width  , landmarks[0].y * overlayCanvas.height);
+
+    ctx.beginPath();
+    ctx.strokeStyle = 'red';
+    ctx.moveTo((/Mobi|Android/i.test(navigator.userAgent) ? landmarks[0].x : 1 - landmarks[0].x) * overlayCanvas.width, landmarks[0].y * overlayCanvas.height );
+    ctx.lineTo((/Mobi|Android/i.test(navigator.userAgent) ? landmarks[0].x : 1 - landmarks[0].x) * overlayCanvas.width, landmarks[0].y * overlayCanvas.height - 10 );  
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo((/Mobi|Android/i.test(navigator.userAgent) ? landmarks[0].x : 1 - landmarks[0].x) * overlayCanvas.width, landmarks[0].y * overlayCanvas.height );
+    ctx.lineTo((/Mobi|Android/i.test(navigator.userAgent) ? landmarks[0].x : 1 - landmarks[0].x) * overlayCanvas.width - 10, landmarks[0].y * overlayCanvas.height  );  
+    ctx.strokeStyle = 'green';
+    ctx.stroke();
+    ctx.closePath();  // Fecha o caminho da linha
+
 
     landmarks.forEach((point, i) => {
         // Aplica rotação nos pontos individuais
         const rotated = rotate3D(point, { pitch: 0 * (Math.PI / 180), yaw: 0, roll: 0 });
 
+        
+        return
+
         // Corrige inversão horizontal
         const mirroredX = 1.0 - rotated.x;
 
         // Escala e posiciona na tela com perspectiva (opcional, mas você pode manter)
-        const x = mirroredX * overlayCanvas.width;
-        const y = rotated.y * overlayCanvas.height;
+        let x = mirroredX * overlayCanvas.width;
+        let y = rotated.y * overlayCanvas.height;
         // const z = rotated.z * overlayCanvas.height;
 
         // Manipula o valor de z para simular profundidade
@@ -573,48 +767,45 @@ function drawPointsCanvas(landmarks, overlayCanvas, ctx, color, label) {
         // radius = (radius + 2) > 10 ? 10 : radius + 2;
         radius = 6;
 
+        // x = overlayCanvas.width - ((point.x - minX) / (maxX - minX)) * overlayCanvas.width;
+        // y = ((point.y - minY) / (maxY - minY)) * overlayCanvas.height;
+        // x = x * 0.3;
+        // y = y * 0.3;
 
         // Desenha o ponto na tela
         ctx.beginPath();
         const flippedX = overlayCanvas.width - point.x.toFixed(4) * overlayCanvas.width;
         ctx.arc(flippedX, point.y.toFixed(4) * overlayCanvas.height, radius, 0, 2 * Math.PI);
+    
         ctx.fillStyle = arrayIndexOrder.includes(i) ? "yellow" : color;
         ctx.fill();
         ctx.closePath(); // Fecha o caminho
 
-  
-
-  
-        
-
-        if(arrayIndexOrder.includes(i)) {
+        if(arrayIndexOrder.includes(i) && true) {
             // Desenha cada coordenada com uma cor diferente
             const xText = `${(x / overlayCanvas.width).toFixed(2)}`;
             const yText = `${(y / overlayCanvas.height).toFixed(2)}`;
             const zText = `${((point.z * overlayCanvas.height) * 1000).toFixed(2)}`;
 
-       
-        
+            ctx.font = '12px Arial';
             // Cor para o x
             ctx.fillStyle = '#33ff05';        
-            ctx.fillText(xText, x, y);
+            ctx.fillText(xText, x + 5, y);
             
             // Cor para o y
             ctx.fillStyle = 'red';
-            ctx.fillText(yText, x + ctx.measureText(xText).width + 5, y);  // Posição ajustada para o próximo valor
+            ctx.fillText(yText, x + ctx.measureText(xText).width + 10, y);  // Posição ajustada para o próximo valor
         
             // Cor para o z
             ctx.fillStyle = 'blue';
-            ctx.fillText(zText, x + ctx.measureText(xText).width + ctx.measureText(yText).width + 10, y);  // Posição ajustada
+            ctx.fillText(zText, x + ctx.measureText(xText).width + ctx.measureText(yText).width + 15, y);  // Posição ajustada
             ctx.fillStyle = 'white';
           
-
             areaIndex[areaIndex.length] = [x, y, parseFloat(zText), i];
             areaIndex = areaIndex.filter(item => item !== null);
 
-            
             // Posicionamento e desenhando o texto
-            if (areaIndex.length === 6) {
+            if (areaIndex.length === 6 && true) {
 
                 areaIndex.sort((a, b) => {
                     const indexA = arrayIndexOrder.indexOf(a[3]);
@@ -704,7 +895,7 @@ function drawPointsCanvas(landmarks, overlayCanvas, ctx, color, label) {
                 // }`, areaIndex[1][0] + 20 , areaIndex[1][1] + 20);  // Posição ajustada para o próximo valor
 
                 let t_ = tamanhoReta({x: areaIndex[4][0] , y: areaIndex[4][1] , z: 0}, {x: areaIndex[5][0] , y: areaIndex[5][1] , z: 0})
-                ctx.fillText(`${ (t_ / overlayCanvas.height).toFixed(2) }`, areaIndex[4][0] + 20 , ((areaIndex[4][1] + areaIndex[5][1]) / 2) );  // Posição ajustada para o próximo valor
+                ctx.fillText(`${ (t_ / overlayCanvas.height).toFixed(2) }r`, areaIndex[4][0] + 20 , ((areaIndex[4][1] + areaIndex[5][1]) / 2) );  // Posição ajustada para o próximo valor
 
 
                 const raio = calcularRaio( {x: areaIndex[4][0] , y: areaIndex[4][1] , z: 0}, {x: areaIndex[5][0] , y: areaIndex[5][1] , z: 0} );
@@ -719,13 +910,10 @@ function drawPointsCanvas(landmarks, overlayCanvas, ctx, color, label) {
                  
             }
 
-       
- 
         }
   
     });
 }
-
 
 /**
  * Calcula o ângulo (em graus) da reta formada por dois pontos 2D
@@ -739,14 +927,14 @@ function anguloReta(p1, p2) {
     const rad = Math.atan2(dy, dx); // ângulo em radianos  [-π, π]
     const deg = rad * (180 / Math.PI); // convertendo para graus
     return deg;
-  }
+}
 
-  // Função que calcula o comprimento da reta (raio)
-  function calcularRaio(p1, p2) {
+// Função que calcula o comprimento da reta (raio)
+function calcularRaio(p1, p2) {
     const dx = p2.x - p1.x;
     const dy = p2.y - p1.y;
     return Math.sqrt(dx * dx + dy * dy);
-  }
+}
 
 /**
  * Calcula o comprimento de uma reta entre dois pontos (2D ou 3D)
@@ -802,7 +990,6 @@ function direcaoEntreVetores(v1, v2) {
       z: dz / magnitude
     };
 }
-  
   
 /**
  * Calcula o ângulo (em radianos) entre dois vetores 3D
@@ -960,20 +1147,20 @@ function handlerDevicemotion(event){
   console.log("Rot rate alpha:", rotRate.alpha, "°/s");
 }
 
-function uploadGLTF(event){
+function uploadGLTF(filegltf, callback){
     console.log("[uploadGLTF]");
     
     const loader = new GLTFLoader();
     let handModel;
     
-    loader.load('/static/models/character.glb', (gltf) => {
+    return loader.load(`/static/models/${filegltf}`, (gltf) => {
         handModel = gltf.scene;
         handModel.scale.set(8, 8, 8);
-        handModel.position.set(0, 0, -1.5); // um pouco abaixo e à frente da visão
+        handModel.position.set(0, 0, 0); // um pouco abaixo e à frente da visão
         handModel.rotation.set(
-            THREE.MathUtils.degToRad(-90), // pitch
+            THREE.MathUtils.degToRad(0), // pitch
             THREE.MathUtils.degToRad(0), // yaw 
-            THREE.MathUtils.degToRad(150) // roll
+            THREE.MathUtils.degToRad(0) // roll
         );
         const axesHelper = new THREE.AxesHelper(1);
         handModel.add(axesHelper);
@@ -984,36 +1171,28 @@ function uploadGLTF(event){
         // handModel.rotation.y = Math.PI; // Gira 180° se estiver de costas
 
         Game.camera.add(handModel); // Para manter sempre visível
-        // handModel.position.set(0, 1, -1); // Em relação à câmera
+        handModel.position.set(-1, -0.5, -1); // Em relação à câmera
         console.log({handModel});
     
 
-        handBonesRight = {};
+        const handBones = {};
         gltf.scene.traverse((obj) => {
             if (obj.isBone) {
-                handBonesRight[obj.name] = obj;
+                handBones[obj.name] = obj;
             }
         });
 
-
-
-
         const bones = getBonesFromModel(handModel);
-        Game.players[0].mesh.hands.model = handModel;
-        Game.players[0].mesh.hands.bones = bones;
 
-        // const helper = new THREE.AxesHelper(0.2);
-        // Game.players[0].mesh.hands.model.add(helper);
-
-
-      
+        if(typeof callback === 'function') callback({
+            handModel,
+            handBones,
+            bones
+        });
 
     }, undefined, (error) => {
       console.error('Erro ao carregar o modelo da mão:', error);
     });
-
-
-    
 }
 
 /**
@@ -1027,7 +1206,7 @@ function inverterCrescimento(valorAtual, min = 0, max = 0.20) {
     return max - (valorAtual - min);
 }
 
-  /**
+/**
  * Escala um valor de um intervalo para outro
  * @param {number} valor - o valor que será escalado
  * @param {number} deMin - valor mínimo original
@@ -1039,6 +1218,47 @@ function inverterCrescimento(valorAtual, min = 0, max = 0.20) {
 function escalarValor(valor, deMin, deMax, paraMin, paraMax) {
     const proporcao = (valor - deMin) / (deMax - deMin);
     return paraMin + proporcao * (paraMax - paraMin);
+}
+
+/**
+ * Rotaciona um bone do esqueleto com base na direção entre dois landmarks
+ * @param {THREE.Skeleton} skeleton - Skeleton do modelo
+ * @param {string} boneName - Nome do bone (ex: 'mixamorigRightHandIndex4')
+ * @param {Array} landmarks - worldLandmarks do MediaPipe
+ * @param {number} startIndex - índice do landmark inicial (ex: 7)
+ * @param {number} endIndex - índice do landmark final (ex: 8)
+ * @param {number} scale - multiplicador de escala para os landmarks (ex: 10)
+ * @param {THREE.Vector3} baseDirection - direção neutra do osso no bind pose (default: Y+)
+ */
+function rotateBoneFromLandmarks(skeleton, boneName, landmarks, startIndex, endIndex, scale = 1, baseDirection = new THREE.Vector3(0, 1, 0)) {
+    const bone = skeleton[boneName];
+    // console.log({skeleton});
+    if (!bone || !landmarks[startIndex] || !landmarks[endIndex]) return;
+ 
+    
+    const start = new THREE.Vector3(
+      landmarks[startIndex].x,
+      -landmarks[startIndex].y,
+      -landmarks[startIndex].z
+    ).multiplyScalar(scale);
+  
+    const end = new THREE.Vector3(
+      landmarks[endIndex].x,
+      -landmarks[endIndex].y,
+      -landmarks[endIndex].z
+    ).multiplyScalar(scale);
+
+
+  
+    const direction = new THREE.Vector3().subVectors(end, start).normalize();
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(baseDirection, direction);
+  
+    // console.log(start);
+
+    // bone.quaternion.copy(quaternion);
+    // bone.position.copy(start); // opcional: move o bone para o ponto inicial
+
+    return { quaternion: quaternion, direction: direction, rotation: bone.rotation, start: start, end: end };
 }
 
 function updateHandSkeletonFromLandmarks(bones, landmarks, model, boneMap = boneMapRight, scale = 4) {
@@ -1053,12 +1273,15 @@ function updateHandSkeletonFromLandmarks(bones, landmarks, model, boneMap = bone
 
     
     // 🟢 1. Base: posição do pulso (landmark 0)
-    const wrist = landmarks[0];
+    let wrist = landmarks[0];
+
     const wristPos = new THREE.Vector3(
       (1.0 - wrist.x - 0.5) * scale,
       -(wrist.y - 0.5) * scale,
       wrist.z * scale
     );
+
+    model.position.copy(wristPos);
 
 
     
@@ -1103,9 +1326,9 @@ function updateHandSkeletonFromLandmarks(bones, landmarks, model, boneMap = bone
   
     // 🛠️ 4. Aplica offset de rotação (ajuste visual manual)
     const manualEulerOffset = new THREE.Euler(
-      THREE.MathUtils.degToRad(0),  // X - inclina a palma pra baixo
-      THREE.MathUtils.degToRad(25), // Y - vira a palma pra frente
-      THREE.MathUtils.degToRad(190)   // Z - leve inclinação lateral
+      THREE.MathUtils.degToRad(90),  // X - inclina a palma pra baixo
+      THREE.MathUtils.degToRad(-77), // Y - vira a palma pra frente
+      THREE.MathUtils.degToRad(90)   // Z - leve inclinação lateral
     );
     const offsetQuaternion = new THREE.Quaternion().setFromEuler(manualEulerOffset);
   
@@ -1155,7 +1378,7 @@ function updateHandSkeletonFromLandmarks(bones, landmarks, model, boneMap = bone
 
     // 🔁 Rotação baseada em landmarks[5] → [6]
     const bone = bones['mixamorigLeftHandIndex1'];
-    if (bone && landmarks[5] && landmarks[6] && true) {
+    if (bone && landmarks[5] && landmarks[6] && false) {
         const scale = 4; // ou o que estiver sendo usado na sua função
 
         let fromVec = new THREE.Vector3(
@@ -1176,14 +1399,21 @@ function updateHandSkeletonFromLandmarks(bones, landmarks, model, boneMap = bone
         // console.log(`dis: ${ (distancia(fromVec, toVec).toFixed(2) )  }, ${Math.sin(Date.now() * 0.001) * 0.4}`);
         // console.log(`dis: ${distancia(fromVec, toVec)}`);
         
-        if(distancia(fromVec, toVec) < 1.5){
-            bone.rotation.x = 2;//Math.sin(Date.now() * 0.001) * 0.4; 
-        }else{
-            bone.rotation.x = 0;
-        }
+        // if(distancia(fromVec, toVec) < 1.5){
+        //     bone.rotation.x = 2;//Math.sin(Date.now() * 0.001) * 0.4; 
+        // }else{
+        //     bone.rotation.x = 0;
+        // }
+        //    console.log(Game.players[0].resultDetectForVideo.worldLandmarks);
        
+        let {start, end} = rotateBoneFromLandmarks(bones, 'mixamorigLeftHandIndex1', Game.players[0].resultDetectForVideo.worldLandmarks[0], 5, 6, 10, new THREE.Vector3(0, 1, 0));
+        console.log(start.y.toFixed(2), end.y.toFixed(2));
+        
+        
+        // bone.rotation.x = rotation_.x;
 
-      
+
+   
 
         // const direction = new THREE.Vector3().subVectors(toVec, fromVec).normalize();
         // const boneUp = new THREE.Vector3(0, 1, 0); // Eixo padrão Mixamo
@@ -1260,7 +1490,7 @@ function distancia(a, b) {
  */
 function remapear(valor, deMin, deMax, paraMin, paraMax) {
     return ((valor - deMin) * (paraMax - paraMin)) / (deMax - deMin) + paraMin;
-  }
+}
 
 function flipX(point, scale = 4) {
     return new THREE.Vector3(
@@ -1317,10 +1547,10 @@ function getBonesFromModel(model) {
 }
 
 function animate() {
-    
-
     // requestAnimationFrame(animate);
     const delta = Game.clock.getDelta();
+    fps = 1 / delta;
+    lastTime = delta;
 
     setVelocityXZY({vVelocity, keys,  delta});
 
@@ -1344,6 +1574,9 @@ function animate() {
     if (Game.scene && Game.camera && Game.renderer) {
         Game.renderer.render(Game.scene, Game.camera);
     }
+
+    ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+    ctx.fillText(`fps: ${fps.toFixed(2)}`, overlayCanvas.width - 50, 10);  // Posição ajustada para o próximo valor
     
 }
 
@@ -1356,4 +1589,3 @@ window.addEventListener('resize', handlerResize);
 document.addEventListener("touchstart", handlertouchstart);
 document.addEventListener("touchmove", handlerTouchmove);
 window.addEventListener("devicemotion", handlerDevicemotion, true);
-
