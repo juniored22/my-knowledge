@@ -1,33 +1,121 @@
-import * as THREE                       from 'https://esm.sh/three';
-import * as dat                         from 'https://esm.sh/dat.gui';
-import { VRButton }                     from 'https://esm.sh/three/examples/jsm/webxr/VRButton';
-import { GLTFLoader }                   from 'https://esm.sh/three/examples/jsm/loaders/GLTFLoader';
-import { PointerLockControls }          from 'https://esm.sh/three/examples/jsm/controls/PointerLockControls';
-import { DeviceOrientationControls }    from '/static/modules/DeviceOrientationControls.mjs';
-import vision                           from "/libs/@mediapipe/tasks-vision/vision_bundle.mjs"; //https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0
+import * as THREE                           from 'https://esm.sh/three';
+import * as dat                             from 'https://esm.sh/dat.gui';
+import { VRButton }                         from 'https://esm.sh/three/examples/jsm/webxr/VRButton';
+import { GLTFLoader }                       from 'https://esm.sh/three/examples/jsm/loaders/GLTFLoader';
+import { PointerLockControls }              from 'https://esm.sh/three/examples/jsm/controls/PointerLockControls';
+import { DeviceOrientationControls }        from '/static/modules/DeviceOrientationControls.mjs';
+import { ColorGUIHelper }                   from '/static/modules/Gui.mjs';
+import { detectarBolinhaHSV, createCanvas } from '/static/utils/detecterTool.mjs';
+import vision                               from "/libs/@mediapipe/tasks-vision/vision_bundle.mjs"; //https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.0
+import { Render }                           from "/static/modules/Render.mjs";
+import { Camera }                           from "/static/modules/Camera.mjs";
+import { MeshLine, MeshLineMaterial }       from '/static/modules/THREE.MeshLine.js';
+import { Floor }                            from '/static/modules/Floor.mjs';
+import { webSocketHandler }                 from './webSocket.mjs';
+import { requestDeviceOrientationPermission } from '/static/utils/permission.mjs';
+import { 
+    Lights, 
+    HemisphereLight, 
+    DirectionalLight, 
+    DirectionalLightHelper, 
+    PointLight, 
+    PointLightHelper, 
+    SpotLight, 
+    SpotLightHelper, 
+    RectAreaLight, 
+    RectAreaLightHelperModified,
+    moveSpotLight,
+    swingSpotLight
+}                                           from "/static/modules/Lights.mjs";
 
-const DEBUGGER = true;
 
+
+/**
+ * Notes:
+ * - https://developer.mozilla.org/en-US/docs/Web/API/Canvas_API
+ * - https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D
+ * - https://developer.mozilla.org/en-US/docs/Web/API/Canvas_2D_API
+ * 
+ * Use no DevTools (no próprio Chrome no Android): chrome://inspect
+ */
+
+/*
+ * HandLandmarker:
+ *   Uma orquestra de algoritmos que rastreia e reconhece
+ *   a posição exata das mãos, transformando imagens e vídeos
+ *   em partituras claras dos seus movimentos.
+
+ * FilesetResolver:
+ *   O guardião dos recursos, encarregado de selecionar e
+ *   prover todos os arquivos essenciais para a magia 
+ *   do HandLandmarker acontecer sem interrupções.
+
+ * DrawingUtils:
+ *   O artista envolto em pixels, dedicado a realçar e
+ *   ilustrar cada ponto de detecção, revelando a beleza
+ *   sutil dos gestos com traços precisos.
+*/
 const { HandLandmarker , FilesetResolver, DrawingUtils } = vision;
-const performanceStart = performance.now(); 
-const overlayCanvas = document.getElementById('overlay');
-const ctx = overlayCanvas.getContext('2d');
-const preproceImage = document.getElementById('preprocessed');
-const ctxPreproceImage = preproceImage.getContext('2d');
 
-let handLandmarker = null;
-let latestResults = null;
-let landmarkMeshes = [];
-let videoTexture = null;
-let previousZ = 0; // Raio/valor inicial de z
-let radius = 0.1;
-let frameCounter = 0;
-let handModelRight = null;
-let handBonesRight = null;
-let valorAnterior = null;
-let lastTime = performance.now();
-let fps = 0;
-const video = document.getElementById('webcam');
+const DEBUGGER          = true;
+const DEBUGGER_OBJECTS  = false;
+
+const performanceStart          = performance.now(); 
+const mainCanvas                = document.getElementById('main-canvas');
+const offscreenMainCanvas       = null; // mainCanvas.transferControlToOffscreen();
+const overlayCanvas             = document.getElementById('overlay');
+const ctx                       = overlayCanvas.getContext('2d');
+const preproceImage             = document.getElementById('preprocessed');
+const ctxPreproceImage          = preproceImage.getContext('2d', { willReadFrequently: true });
+const numberFrameLoopDetect     = 3; // em ms
+const video                     = document.getElementById('webcam');
+const worker                    = new Worker('/static/modules/worker.mjs', { type: 'module' });
+const trackBollHand             = {}
+const renderer                  = await Render(mainCanvas, {width: window.innerWidth, height:window.innerHeight, devicePixelRatio: window.devicePixelRatio});
+const camera                    = await Camera({aspect: window.innerWidth/window.innerHeight});
+const landmarkGroup             = new THREE.Group();
+const canvasWs                  = createCanvas("canvas-websocket", 320, 240, false);
+const contextWs                 = canvasWs.getContext("2d")
+const ws                        = webSocketHandler();
+const maxFramesSocket           = 5;
+const timeHiddeHands            = 800;
+
+
+// TODO: refatorar para OffscreenCanvas
+if(!('OffscreenCanvas' in window)) console.warn('OffscreenCanvas not supported');
+// OffscreenCanvas com WebGL nem sempre está ativado por padrão (pode exigir flag: chrome://flags/#enable-offscreen-canvas)
+// const canvas_3d = document.getElementById('three-canvas');
+// const offscreen = canvas_3d.transferControlToOffscreen();
+
+let handLandmarker  = null;
+let latestResults   = null;
+let landmarkMeshes  = [];
+let videoTexture    = null;
+let previousZ       = 0; // Raio/valor inicial de z
+let radius          = 0.1;
+let frameCounter    = 0;
+let handModelRight  = null;
+let handBonesRight  = null;
+let valorAnterior   = null;
+let timeAnimarion   = 0;
+let lastTime        = performance.now();
+let lastTime2       = performance.now();
+let lastTime3       = performance.now();
+let lastTime4       = performance.now();
+let fps             = 0;
+let fpsThree        = 0;
+let fpsMediaPipe    = 0;
+let wakeLock        = null;
+let useSecondCamera = false;
+let scoreHand       = 0;
+let detectMethod    = 'none';
+
+// linear color space
+const API = {
+    lightProbeIntensity: 1.0,
+    directionalLightIntensity: 0.6,
+    envMapIntensity: 1
+};
 
 const boneMapRight = {
     0: 'mixamorigRightHand',
@@ -77,7 +165,7 @@ const boneMapLeft = {
    20: 'mixamorigLeftHandPinky4',
 }
 
-const handConnections = [
+const handConnections_deprecated = [
     [0, 1], [1, 2], [2, 3], [3, 4],
     [0, 5], [5, 6], [6, 7], [7, 8],
     [0, 9], [9, 10], [10, 11], [11, 12],
@@ -85,14 +173,54 @@ const handConnections = [
     [0, 17], [17, 18], [18, 19], [19, 20]
 ];
 
-window.Game = {
+const handConnections = [
+    [0, 1],
+    [1, 5],
+    [5, 9],
+    [9, 13],
+    [13, 17],
+    [17, 0],
+    [1, 2],
+    [2, 3],
+    [3, 4],
+    [5, 6],
+    [6, 7],
+    [7, 8],
+    [9, 10],
+    [10, 11],
+    [11, 12],
+    [13, 14],
+    [14, 15],
+    [15, 16],
+    [17, 18],
+    [18, 19],
+    [19, 20]
+];
+
+const handRotationOffset = {
+    x: 0,   // graus
+    y: 0,
+    z: 180
+};
+
+const urls = [
+    'https://threejs.org/manual/examples/resources/images/grid-1024.png',
+    'https://threejs.org/manual/examples/resources/images/grid-1024.png',
+    'https://threejs.org/manual/examples/resources/images/grid-1024.png',
+    'https://threejs.org/manual/examples/resources/images/grid-1024.png',
+    'https://threejs.org/manual/examples/resources/images/grid-1024.png',
+    'https://threejs.org/manual/examples/resources/images/grid-1024.png',
+];
+
+const Game = {
     scene: new THREE.Scene(),
-    camera: new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000),
+    camera: camera,
+    cameraTop: new THREE.PerspectiveCamera(45, window.innerWidth/window.innerHeight, 0.1, 1000),
     clock: new THREE.Clock(),
-    renderer: new THREE.WebGLRenderer({ antialias: true }),
+    renderer: renderer,
     objAmbientLight: {
         ambientLight: new THREE.AmbientLight(0x888888),
-        directionalLight: new THREE.DirectionalLight(0xffffff, 1)
+        directionalLight: new THREE.HemisphereLight(0xffffff, 0x444444, 1) //new THREE.DirectionalLight(0xffffff, 1)
     },
     level: {
         floor: new THREE.Mesh(
@@ -135,92 +263,86 @@ window.Game = {
             touchStartY:0
         }}
     ],
-    divice: {
+    device: {
         mobile: (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent))
     }
 }
 
-const handRotationOffset = {
-    x: 0,   // graus
-    y: 0,
-    z: 180
-};
+camera.add(new THREE.AxesHelper(10));
+Game.cameraTop.position.set(0, 20, 0);
+Game.cameraTop.lookAt(0, 0, 0);
 
-Game.renderer.setClearColor(0xffffff);
-Game.renderer.setSize(window.innerWidth, window.innerHeight);
-Game.renderer.xr.enabled = true;
-Game.objAmbientLight.directionalLight.position.set(10, 10, 10);
-Game.camera.lookAt(0, 0, 0);
+await setOffscreenMainCanvas();
+await loadGLTFtoScene();
 
-
-const gridHelper = new THREE.GridHelper( 200, 200 );
-Game.scene.add(gridHelper);
-gridHelper.position.set(0, -4, 0);
-
-const cameraHelper = new THREE.CameraHelper( Game.camera );
-Game.scene.add( cameraHelper );
+const lights        = await PointLight({intensity: 3, name: 'lights'});
+const spotLight     = await SpotLight({intensity: 100, name: 'spotLight'});
+const spotLightTest = await SpotLight({color: 0x0000ff, intensity: 50, name: 'spotLightTest'});
+const spotLightTestHelper = await SpotLightHelper({light: spotLightTest});
+const rectAreaLight = await RectAreaLight({intensity: 3, name: 'RectAreaLight'});
+const floor         = await Floor({name: 'floor'});
+floor.receiveShadow = true;
+// spotLightTest.map = new THREE.TextureLoader().load('https://threejs.org/examples/textures/disturb.jpg');
 
 
-if (Game.divice.mobile) {
+Game.scene.add(RectAreaLightHelperModified({light: rectAreaLight}));
+Game.scene.add(lights);
+Game.scene.add(spotLight);
+Game.scene.add(spotLightTest);
+Game.scene.add(rectAreaLight);
+Game.scene.add(floor);
+Game.scene.add(Game.camera);
+
+DEBUGGER_OBJECTS && Game.scene.add(spotLightTestHelper);
+DEBUGGER_OBJECTS && Game.scene.add(PointLightHelper({light: lights}));
+DEBUGGER_OBJECTS && Game.scene.add(SpotLightHelper({light: spotLight}));
+
+const spheresHands = [
+    createLandmarkGroupInstanced(), //createLandmarkGroup(),
+    createLandmarkGroupInstanced(), //createLandmarkGroup()
+];
+
+// Adiciona os skeletons para cada mão:
+spheresHands[0].skeleton = createSkeletonLine();
+spheresHands[1].skeleton = createSkeletonLine();
+
+Game.camera.add(landmarkGroup);
+
+
+// Crie uma matriz de transformação
+const matrix = new THREE.Matrix4();
+!Game.device.mobile && matrix.makeRotationY( THREE.MathUtils.degToRad(180) ); // Rotaciona 45 graus em torno de Y
+const translationMatrix = new THREE.Matrix4().makeTranslation(0, 0, Game.device.mobile ? -2 : 1.5); // Translada 1 unidade em X
+matrix.multiply(translationMatrix); // Combina as transformações
+landmarkGroup.applyMatrix4(matrix);
+
+if (Game.device.mobile) {
     Game.controlsMobile = new DeviceOrientationControls(Game.camera);
+    Game.controlsMobile.enabled = true;
     Game.controls = new PointerLockControls(Game.camera, document.body);
 } else {
     Game.controls = new PointerLockControls(Game.camera, document.body);
 }
 
-// Game.controls.object.position.set(0, 4, 3);
-
-async function requestDeviceOrientationPermission() {
-    if (typeof Game.controlsMobile !== 'undefined' && typeof Game.controlsMobile.requestPermission === 'function') {
-
-        try {
-            const response = await Game.controlsMobile.requestPermission();
-            if (response === 'granted') {
-                alert('✅ Permissão concedida para sensores!');
-                console.log('✅ Permissão concedida para sensores!');
-            } else {
-                alert('⚠️ Permissão negada para sensores!');
-                console.warn('⚠️ Permissão negada para sensores!');
-            }
-        } catch (error) {
-            alert('Erro ao solicitar permissão de orientação');
-            console.error('Erro ao solicitar permissão de orientação:', error);
-        }
-  
-    } else {
-        alert('🔓 Permissão não necessária (Android ou desktop)');
-        console.log('🔓 Permissão não necessária (Android ou desktop)');
-    }
-}
-
 await requestDeviceOrientationPermission();
 
-document.body.appendChild(Game.renderer.domElement);
 document.body.appendChild(VRButton.createButton(Game.renderer));
-if (!Game.divice.mobile) document.querySelector('#mobile-controls').style.display = 'none';
+
+if (!Game.device.mobile) document.querySelector('#mobile-controls').style.display = 'none';
 
 const instructions = document.getElementById('instructions');
 
-if (!Game.divice.mobile) {
+if (!Game.device.mobile) {
     instructions.addEventListener('click', () => Game.controls.lock());
     Game.controls.addEventListener('lock', () => instructions.style.display = 'none');
     Game.controls.addEventListener('unlock', () => instructions.style.display = '');
 } else {
     instructions.style.display = 'none'; // Não exibe instruções no mobile
+    Game.camera.position.set(0, 3, 10);
+    Game.camera.lookAt(0, 0, 0);
 }
 
-//TODO: Remover
-// instructions.style.display = 'none'; // Não exibe instruções no mobile
-
-Game.scene.add(Game.objAmbientLight.directionalLight);
-Game.scene.add(Game.objAmbientLight.ambientLight);
-Game.scene.add(Game.controls.object);
-
-// Chão
-Game.level.floor.rotation.x = -Math.PI / 2;
-Game.level.floor.position.y = -4;
-Game.scene.add(Game.level.floor);
-
+/*
 // Mãos
 const handGeo = new THREE.BoxGeometry(0.02, 0.02, 0);
 const handMatRight = new THREE.MeshStandardMaterial({ color: 0x0000ff  });
@@ -232,15 +354,7 @@ Game.players[0].mesh.rightHand = new THREE.Mesh(handGeo, handMatRight);
 // Game.players[0].mesh.rightHand.position.set(0.3, -0.3, -0.7);
 // Game.camera.add(Game.players[0].mesh.leftHand);
 // Game.camera.add(Game.players[0].mesh.rightHand);
-
-// Cubo com física fake
-const cubeSize = 1;
-const physicsCube = new THREE.Mesh(
-    new THREE.BoxGeometry(cubeSize, cubeSize, cubeSize),
-    new THREE.MeshStandardMaterial({ color: 0xff4444 }));
-physicsCube.position.set(0, 0.5, -4);
-physicsCube.add(new THREE.AxesHelper(1));
-Game.scene.add(physicsCube);
+*/
 
 const cubeVelocity = new THREE.Vector3();
 const keys = {};
@@ -249,30 +363,164 @@ const vVelocity = new THREE.Vector3();
 document.addEventListener('keydown', e => keys[e.code] = true);
 document.addEventListener('keyup', e => keys[e.code] = false);
 
-const geometry = new THREE.BoxGeometry( 1, 1, 1 ); 
-const material = new THREE.MeshBasicMaterial( {color: 0x00ff00} ); 
-const cube = new THREE.Mesh( geometry, material ); 
-const cameraDirection = new THREE.Vector3();
-Game.camera.getWorldDirection(cameraDirection);
-Game.scene.add( cube );
-// cube.position.copy(Game.camera.position).add(cameraDirection.multiplyScalar(-2));
-cube.position.set(10, 0.5, 0);
-cube.add(new THREE.AxesHelper(1));
-// cube.add(new THREE.PolarGridHelper( 10, 16, 6, 64 ));
 
-if(!Game.divice.mobile){
-    const gui = new dat.GUI();
-    const folder = gui.addFolder('Hand Rotation Offset');
-    folder.add(handRotationOffset, 'x', -180, 180).step(1).name('X - inclinação');
-    folder.add(handRotationOffset, 'y', -180, 180).step(1).name('Y - palma');
-    folder.add(handRotationOffset, 'z', -180, 180).step(1).name('Z - lateral');
-    folder.open();
+
+
+/***************************************************************
+ * 4) Criando objetos 3D: Cubo e pontos da mão
+ ***************************************************************/
+// Cubo no fundo (z = -2)
+const cubeGeometry = new THREE.BoxGeometry();
+const cubeMaterial = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff,
+    metalness: 0.5,
+    roughness: 0.1,
+    clearcoat: 1.0,
+    clearcoatRoughness: 0.05,
+    reflectivity: 1.0,
+    envMapIntensity: API.envMapIntensity,
+  });
+const objectTest = new THREE.Mesh(cubeGeometry, cubeMaterial);
+objectTest.position.set(10, 3, -2);
+objectTest.castShadow = true;
+objectTest.receiveShadow = true;
+
+spotLightTest.position.set(objectTest.position.x + 5, spotLightTest.position.y, objectTest.position.z + 4);
+Game.scene.add(objectTest);
+
+
+/***************************************************************
+ * 5) Raycaster para "clicar" no cubo e posicionar esferas
+ ***************************************************************/
+const raycaster = new THREE.Raycaster();
+const pointer = new THREE.Vector2();
+// Um plano em Z=0 para projetar os landmarks
+const planeZ0 = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+
+
+function raycastCubeFromLandmark(normX, normY) {
+    pointer.x = (normX * 2) - 1;
+    pointer.y = -((normY * 2) - 1);
+
+    raycaster.setFromCamera(pointer, camera);
+    const intersects = raycaster.intersectObject(objectTest, true);
+    if (intersects.length > 0) {
+        objectTest.material.color.set(0xff0000);
+    } else {
+        objectTest.material.color.set(0xffffff);
+    }
 }
 
 
 function infoGame (){
     console.log({performance: performance.now() - performanceStart, clock: Game.clock.getDelta()});
     setTimeout(infoGame, 100);
+}
+
+function createSkeletonMeshLine() {
+    // Inicialmente cria um array de pontos (inicialmente todos com 0)
+    const points = [];
+    for (let i = 0; i < handConnections.length; i++) {
+      // Cada conexão gera dois pontos
+      points.push(new THREE.Vector3(0, 0, 0));
+      points.push(new THREE.Vector3(0, 0, 0));
+    }
+  
+    // Cria o MeshLine com os pontos
+    const meshLine = new MeshLine();
+    meshLine.setPoints(points);
+  
+    // Cria o material customizado para definir a espessura da linha
+    const material = new MeshLineMaterial({
+      color: new THREE.Color(0x00ff00),
+      lineWidth: 1, // Ajuste para espessura desejada. Atenção: o valor depende das unidades de cena.
+      sizeAttenuation: true
+    });
+  
+    // Cria a Mesh do MeshLine
+    const mesh = new THREE.Mesh(meshLine.geometry, material);
+    landmarkGroup.add(mesh);
+    return mesh;
+  }
+
+// --- FUNÇÃO: Atualiza o MeshLine do Skeleton ---
+function updateSkeletonMeshLine(mesh, dummies) {
+    // Cria um novo array de pontos com base nas posições atualizadas de cada dummy
+    const points = [];
+    for (let i = 0; i < handConnections.length; i++) {
+      const [startIdx, endIdx] = handConnections[i];
+      points.push(dummies[startIdx].position.clone());
+      points.push(dummies[endIdx].position.clone());
+    }
+    // Atualiza a geometria do MeshLine criando um MeshLine temporário
+    const tempMeshLine = new MeshLine();
+    tempMeshLine.setPoints(points);
+    mesh.geometry = tempMeshLine.geometry;
+}
+
+async function loadGLTFtoScene() {
+    uploadGLTF('ClearcoatSphere.gltf', (model)=>{
+        Game.scene.add(model.model);
+    }, {x :0, y: 3, z: -10});
+}
+
+async function setOffscreenMainCanvas() {
+    offscreenMainCanvas && worker.postMessage({ type: 'initThreeWorker', canvas: offscreenMainCanvas, width: window.innerWidth, height: window.innerHeight, devicePixelRatio: window.devicePixelRatio }, [offscreenMainCanvas]);
+    worker.onmessage = (e) => {
+        if (e.data.type === 'fps') {
+
+            ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+            ctx.fillStyle = 'red';
+            ctx.fillText(`fps: ${fps}`, overlayCanvas.width - 50, 10);  // Posição ajustada para o próximo valor
+
+        //   document.getElementById('fps').textContent = `FPS: ${e.data.value}`;
+        }
+    };
+
+    Promise.all(urls.map(url => fetch(url)
+    .then(res => res.blob())
+    .then(blob => createImageBitmap(blob))
+    )).then(bitmaps => {
+    worker.postMessage({ type: 'envMap', images: bitmaps }, bitmaps);
+    });
+}
+
+function measureFPS(now, metadata) {
+    const delta = now - lastTime2;
+    lastTime2 = now;
+    const fpsWebcam = 1000 / delta;
+
+    let canvas = null;
+    let widthTextX = 110;
+
+    if(!document.getElementById('fpsCanvas-webcam')){
+        canvas = document.createElement('canvas');
+        document.body.appendChild(canvas)
+    }else{
+        canvas = document.getElementById('fpsCanvas-webcam');
+    }
+    
+    canvas.id = 'fpsCanvas-webcam';
+    canvas.width = overlayCanvas.width;
+    canvas.height = overlayCanvas.height;
+    canvas.style.position = 'absolute';
+    canvas.style.top = '0';
+    canvas.style.left = '0';
+
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+    ctx.fillStyle = 'red';
+    ctx.fillText(`webcam fps: ${fpsWebcam.toFixed(2)}`, overlayCanvas.width - 110, 30);
+    ctx.fillText(`three fps: ${fpsThree.toFixed(2)}`, overlayCanvas.width - widthTextX, 40); 
+    ctx.fillText(`mediaPipe fps: ${fpsMediaPipe.toFixed(2)}`, overlayCanvas.width - widthTextX, 50); 
+    ctx.fillText(`time: ${timeAnimarion.toFixed(2)}`, overlayCanvas.width - widthTextX, 60); 
+    ctx.fillText(`score: ${scoreHand.toFixed(4)}`, overlayCanvas.width - widthTextX, 70); 
+    ctx.fillText(`method: ${detectMethod}`, overlayCanvas.width - widthTextX, 80); 
+    ctx.fillText(`webSocket: ${window.webSocketDebugger}`, overlayCanvas.width - widthTextX, 90); 
+    ctx.fillText(`latency: ${window.webSocketData?.latency || 'N/A'}`, overlayCanvas.width - widthTextX, 100);
+    ctx.fillText(`${overlayCanvas.width}, ${overlayCanvas.height} in: ${numberFrameLoopDetect} ready: ${video.readyState}`, overlayCanvas.width - widthTextX, 110);
+
+    video.requestVideoFrameCallback(measureFPS);
 }
 
 /**
@@ -290,7 +538,7 @@ function infoGame (){
  * @param {number} [options.deviceHeight=480] - Altura ideal da câmera.
  * @param {Object} [options.frameRate={min:30, max:60}] - Taxa de quadros.
  */
-async function webcamEnabled(video, overlayCanvas, callbackLoadedData, {autoplay = true, muted = true, playsInline = true, mobile = /Mobi|Android/i.test(navigator.userAgent), deviceWidth = 640, deviceHeight = 480, frameRate = {min:30, max:60}, flipVideo = true} = {}) {
+async function webcamEnabled(video, overlayCanvas, callbackLoadedData, {autoplay = true, muted = true, playsInline = true, mobile = /Mobi|Android/i.test(navigator.userAgent), deviceWidth = 640, deviceHeight = 480, frameRate = {min:24, max:60}, flipVideo = true} = {}) {
     DEBUGGER && console.log("[webcamEnabled]");
     
     if (!video || !(video instanceof HTMLVideoElement)) {
@@ -302,6 +550,9 @@ async function webcamEnabled(video, overlayCanvas, callbackLoadedData, {autoplay
         console.warn("Elemento <canvas> inválido ou não fornecido.");
         return;
     }
+
+    overlayCanvas.width = deviceWidth;
+    overlayCanvas.height = deviceHeight;
 
     Object.assign(video, { autoplay, muted, playsInline });
 
@@ -317,8 +568,8 @@ async function webcamEnabled(video, overlayCanvas, callbackLoadedData, {autoplay
         const constraints = {
           video: {
             facingMode: mobile ? "environment" : "user",
-            width: { ideal: mobile ? 128 : deviceWidth },
-            height: { ideal: mobile ? 128 : deviceHeight },
+            width: { ideal: mobile ? 256 : deviceWidth },
+            height: { ideal: mobile ? 144 : deviceHeight },
             frameRate: { ideal: frameRate.min, max: frameRate.max },
           },
         };
@@ -332,37 +583,77 @@ async function webcamEnabled(video, overlayCanvas, callbackLoadedData, {autoplay
         });
     
         await video.play();
+        await video.requestVideoFrameCallback(measureFPS);
     } catch (error) {
         console.error("Erro ao acessar a webcam:", error);
         alert("Não foi possível acessar a câmera. Verifique as permissões.");
     }
 }
 
+function captureAndSendImage(time, video) {
+
+    if (ws.readyState !== WebSocket.OPEN) return;
+
+    // 1) Criamos um timestamp local
+    const localTimestamp = performance.now();
+
+    // 2) Enviamos metadata (JSON) com o timestamp
+    ws.send(JSON.stringify({
+        type: "metadata",
+        timestamp: localTimestamp
+    }));
+
+          
+    // Desenha o frame atual do vídeo no canvas
+    contextWs.drawImage(video, 0, 0, canvasWs.width, canvasWs.height);
+
+
+    // Opcional: envia um "ping" a cada x segundos/frames (time % 10 === 0 é apenas um exemplo)
+    if (time % maxFramesSocket === 0) {
+        ws.send(JSON.stringify({
+            type: "ping",
+            timestamp: localTimestamp
+        }));
+        // console.log("Enviando imagem via WebSocket...", time);
+    }
+
+    // Converte o conteúdo do canvas em um blob (imagem em binário) e envia
+    canvasWs.toBlob((blob) => {
+        if (blob && ws.readyState === WebSocket.OPEN) {
+            ws.send(blob);
+        }
+    }, "image/jpeg", 0.5);
+
+}
+
+async function loadHandSkeleton() {
+    await uploadGLTF('RightHand_CV.glb', (model)=>{
+        model.handModel.position.x = -model.handModel.position.x;
+        Game.players[0].mesh.hands.model.right = model;
+        console.log({right: Game.players[0].mesh.hands.model.right});
+    });
+
+    await uploadGLTF('LeftHand_CV.glb', (model)=>{
+        Game.players[0].mesh.hands.model.left = model
+    });
+}
+
+async function setHandpointsMesh() {
+    Game.players[0].mesh.hands.right = createHandpointsMesh('right');
+    Game.players[0].mesh.hands.left = createHandpointsMesh('left');
+}
+
 async function bootstrap() {
     DEBUGGER && console.log("[bootstrap]");
 
     const callbackLoadedData = async () => {
-        initHandLandmarker().then( ()=>{
-            detectLoop()
-        });
+      
+        // initBollHandTracker();
+        initHandLandmarker().then( detectLoop );
+  
     }   
 
-    webcamEnabled(video, overlayCanvas, callbackLoadedData).then( async () => {
-        
-        await uploadGLTF('RightHand_CV.glb', (model)=>{
-            model.handModel.position.x = -model.handModel.position.x;
-            Game.players[0].mesh.hands.model.right = model;
-            console.log({right: Game.players[0].mesh.hands.model.right});
-        });
-
-        await uploadGLTF('LeftHand_CV.glb', (model)=>{
-            Game.players[0].mesh.hands.model.left = model
-        });
-   
-    }).then( () => {
-        Game.players[0].mesh.hands.right = createHandpointsMesh('right');
-        Game.players[0].mesh.hands.left = createHandpointsMesh('left');
-    })
+    webcamEnabled(video, overlayCanvas, callbackLoadedData)//.then( loadHandSkeleton ).then( setHandpointsMesh );
 }
 
 async function initHandLandmarker(){
@@ -381,13 +672,33 @@ async function initHandLandmarker(){
             delegate: "GPU"
         },
         outputFaceBlendshapes: false,
-        // minTrackConfidence: 0.4, // Ajuste conforme necessário 0.0 - 1.0	0.5
-        // minHandPresenceConfidence: 0.0, // Ajuste conforme necessário
-        // minHandDetectionConfidence: 0.5,
+        minTrackConfidence: 0.2, // Ajuste conforme necessário 0.0 - 1.0	0.5
+        minHandPresenceConfidence: 0.2, // Ajuste conforme necessário
+        minHandDetectionConfidence: 0.3,
         runningMode: "VIDEO",
         numHands: 2
     });
 }
+
+async function initBollHandTracker(){
+    DEBUGGER && console.log("[initBollHandTracker]");
+    // track boll hand
+    const offscreenCanvas = createCanvas('offscreen-canvas', 640, 480, false);
+    offscreenCanvas.style.position = 'absolute';
+    offscreenCanvas.style.top = '0';
+    offscreenCanvas.style.left = '0';
+    const offscreen = offscreenCanvas.transferControlToOffscreen();
+    worker.postMessage({ type: 'init', canvas: offscreen }, [offscreen]);
+    worker.onmessage = (event) => {
+        if (event.data.type === 'resultado') {
+            const { bolinhaVermelha, bolinhaAzul } = event.data;
+            if(bolinhaVermelha) trackBollHand.red = bolinhaVermelha;
+            if(bolinhaAzul) trackBollHand.blue = bolinhaAzul;
+        }
+    };
+
+}
+
 
 function createHandpointsMesh(label) {
 
@@ -453,18 +764,31 @@ function createHandpointsMesh(label) {
 
 }
 
+async function requestWakeLock() {
+    try {
+        wakeLock = await navigator.wakeLock.request('screen');
+        wakeLock.addEventListener('release', () => {
+            console.log('O Wake Lock foi liberado');
+        });
+        console.log('Wake Lock ativado');
+    } catch (err) {
+        console.error(`${err.name}: ${err.message}`);
+    }
+}
+
 // Função para suavizar os pontos usando interpolação exponencial
-function smoothPoints(prevPoints, currPoints, alpha = 0.0) {
-    return currPoints.map((point, idx) => {
-      if (prevPoints && prevPoints[idx]) {
-        return {
-          x: alpha * prevPoints[idx].x + (1 - alpha) * point.x,
-          y: alpha * prevPoints[idx].y + (1 - alpha) * point.y,
-          z: alpha * prevPoints[idx].z + (1 - alpha) * point.z
-        };
-      }
-      return point;
-    });
+async function smoothPoints(prevPoints, currPoints, alpha = 0.0){
+    let arr = currPoints.map((point, idx) => {
+        if (prevPoints && prevPoints[idx]) {
+          return {
+            x: alpha * prevPoints[idx].x + (1 - alpha) * point.x,
+            y: alpha * prevPoints[idx].y + (1 - alpha) * point.y,
+            z: alpha * prevPoints[idx].z + (1 - alpha) * point.z
+          };
+        }
+        return point;
+      });
+    return arr;
 }
 
 // 4. Função para Atualizar os Vértices com os Landmarks
@@ -526,15 +850,53 @@ function updatePoints(hand, landmarks, label) {
     // Atualiza SkinnedMesh (se houver bones associados)
     if (Game.players[0].mesh.hands.model.right.bones && label === "Right" && true) {
 
-        // updateHandSkeletonFromLandmarks(Game.players[0].mesh.hands.model.right.bones, smoothLandmarks, Game.players[0].mesh.hands.model.right);
+        // updateHandSkeletonFromLandmarks(Game.players[0].mesh.hands.model.right.bones, smoothLandmarks, Game.players[0].mesh.hands.model.right.handModel);
     }
     
     
 }
 
+
+function createLandmarkGroup() {
+    const spheres = [];
+    const sphereGeometry = new THREE.SphereGeometry(0.02, 16, 16);
+    const sphereMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+
+    // Cria 21 esferas para os landmarks
+    for (let i = 0; i < 21; i++) {
+      const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+      sphere.position.set(0, 0, 0);
+      landmarkGroup.add(sphere);
+      spheres.push(sphere);
+    }
+
+    return spheres;
+}
+
 // Função para atualizar a posição das mãos
 function updateHandPosition(handMesh, landmarks, results, radius, handIndex) {
 
+    if(typeof _loopDebugger2 == 'undefined'){
+        window._loopDebugger2 = true;
+        console.log("[updateHandPosition]»»");
+    }
+
+    results.landmarks.forEach((landmarks, i) => {
+        const label = results.handednesses?.[i]?.[0]?.categoryName;
+        const smoothingFactor = 0.5;
+        const origem = {x:0, y:0, z:-1.5};
+      
+        if (label === "Left") {
+          updateInstancedLandmarkPositions(spheresHands[0], landmarks, smoothingFactor);
+        } else if (label === "Right") {
+          updateInstancedLandmarkPositions(spheresHands[1], landmarks, smoothingFactor);
+        }
+    });
+
+
+
+
+    return
  
     // Mapeando as coordenadas normalizadas (0-1) para o sistema de coordenadas 3D do Three.js
     const wrist = landmarks[0]; // Ponto do pulso, por exemplo
@@ -548,17 +910,26 @@ function updateHandPosition(handMesh, landmarks, results, radius, handIndex) {
     
 
     if(!Game.players[0].mesh.hands?.model?.right?.bones ) return;
+    const smoothingFactor = 0.5;
+    if(handIndex == 0){
+        // const targetPosRed = new THREE.Vector3(x, y, (wrist.z * 1000000) > 0.2 ?  -1.8 : -0.5);
+        const targetPosRed = new THREE.Vector3(x, y, -1);
+        // Game.players[0].mesh.hands.model.right.handModel.position.x = x;// Game.device.mobile ? (landmarks[0].x * 2 - 1) :-(landmarks[0].x * 2 - 1);
+        // Game.players[0].mesh.hands.model.right.handModel.position.y = y; // Game.device.mobile ? -(landmarks[0].y * 2 - 1) :-(landmarks[0].y * 2 - 1);~
+        // Game.players[0].mesh.hands.model.right.handModel.position.z = (wrist.z * 1000000) > 0.2 ?  -1.8 : -0.5;
+        Game.players[0].mesh.hands.model.right.handModel.position.lerp(targetPosRed, smoothingFactor);
 
-   if(handIndex == 0){
-    Game.players[0].mesh.hands.model.right.handModel.position.x = x;// Game.divice.mobile ? (landmarks[0].x * 2 - 1) :-(landmarks[0].x * 2 - 1);
-    Game.players[0].mesh.hands.model.right.handModel.position.y = y; // Game.divice.mobile ? -(landmarks[0].y * 2 - 1) :-(landmarks[0].y * 2 - 1);
-   }else{
-    Game.players[0].mesh.hands.model.left.handModel.position.x = x; // Game.divice.mobile ? (landmarks[0].x * 2 - 1) :-(landmarks[0].x * 2 - 1);
-    Game.players[0].mesh.hands.model.left.handModel.position.y = y; // Game.divice.mobile ? -(landmarks[0].y * 2 - 1) :-(landmarks[0].y * 2 - 1);
+        // console.log(Game.players[0].mesh.hands.model.right.bones[0].rotation.x);
+        
+    }else{
+        const targetPosBlue = new THREE.Vector3(x, y, -1);
+        // Game.players[0].mesh.hands.model.left.handModel.position.x = x; // Game.device.mobile ? (landmarks[0].x * 2 - 1) :-(landmarks[0].x * 2 - 1);
+        // Game.players[0].mesh.hands.model.left.handModel.position.y = y; // Game.device.mobile ? -(landmarks[0].y * 2 - 1) :-(landmarks[0].y * 2 - 1);
+        // Game.players[0].mesh.hands.model.left.handModel.position.z = (wrist.z * 1000000) > 0.2 ?  -1.8 : -0.5;
+        Game.players[0].mesh.hands.model.left.handModel.position.lerp(targetPosBlue, smoothingFactor);
+    }
+    
 
-   }
-   
-    // console.log('»»»»',Game.players[0].mesh.hands.model.right.bones[9].position.x);
 
     if (results && results.landmarks && results.handednesses.length > 0) {
         // Atualiza cada mão detectada
@@ -578,14 +949,169 @@ function updateHandPosition(handMesh, landmarks, results, radius, handIndex) {
                 // updateEdges(handObj, landmarks);
             }
         });
-      }
+    }
 
 
 
 }
+
+// Função para criar um grupo de landmarks usando InstancedMesh
+function createLandmarkGroupInstanced() {
+    const count = 21;
+    const sphereGeometry = new THREE.SphereGeometry(0.02, 16, 16);
+    const sphereMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    
+    // Cria o InstancedMesh com "count" instâncias
+    const instancedMesh = new THREE.InstancedMesh(sphereGeometry, sphereMaterial, count);
+    
+    // Cria um array de "dummies" para armazenar cada transformação individualmente
+    const dummies = [];
+    const dummy = new THREE.Object3D();
+    
+    for (let i = 0; i < count; i++) {
+      dummy.position.set(0, 0, 0);
+      dummy.quaternion.set(0, 0, 0, 1);
+      dummy.scale.set(1, 1, 1);
+      
+      // Gere a matriz inicial sem usar dummy.updateMatrix()
+      const m = new THREE.Matrix4();
+      m.compose(dummy.position, dummy.quaternion, dummy.scale);
+      instancedMesh.setMatrixAt(i, m);
+      // Cria uma cópia do dummy para cada instância
+      dummies.push(dummy.clone());
+    }
+    
+    landmarkGroup.add(instancedMesh);
+    
+    // Retorna um objeto com o instancedMesh e os dummies para atualização posterior
+    return { mesh: instancedMesh, dummies: dummies };
+}
+
+// Função auxiliar para atualizar cada instância de um InstancedMesh
+function updateInstancedLandmarkPositions(handData, landmarks, smoothingFactor) {
+    // handData: objeto retornado por createLandmarkGroupInstanced() contendo {mesh, dummies}
+    for (let j = 0; j < landmarks.length; j++) {
+      const landmark = landmarks[j];
+      // Converte as coordenadas conforme sua lógica (ajuste a escala e offset se necessário)
+      const targetX = (landmark.x - 0.5) * 2;
+      const targetY = -(landmark.y - 0.5) * 2;
+      const targetZ = -landmark.z;
+      const targetPos = new THREE.Vector3(targetX, targetY, targetZ);
+      
+      // Utiliza o dummy correspondente para aplicar o lerp na posição
+      const dummy = handData.dummies[j];
+      dummy.position.lerp(targetPos, smoothingFactor);
+      
+      // Cria uma nova matriz com compose (sem chamar updateMatrix)
+      const newMatrix = new THREE.Matrix4().compose(dummy.position, dummy.quaternion, dummy.scale);
+      
+      // Atualiza a matriz da instância
+      handData.mesh.setMatrixAt(j, newMatrix);
+    }
+    // Sinaliza que as matrizes foram atualizadas
+    handData.mesh.instanceMatrix.needsUpdate = true;
+
+
+    // Raycast para o cubo usando o dedo indicador (indexTip = 8)
+    const indexTip = landmarks[8];
+    raycastCubeFromLandmark(indexTip.x, indexTip.y);
+}
+
+function setPositionBollHandTrack() {
+
+    const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+    const normalizeZ = (z) => {
+        const zMin = 0.0;
+        const zMax = 0.18;
+        const outMin = -1.8;
+        const outMax = -0.5;
+      
+        // clamp no input
+        z = clamp(z, zMin, zMax);
+      
+        return outMin + ((z - zMin) / (zMax - zMin)) * (outMax - outMin);
+    };
+
+    // Fator de suavização: ajuste entre 0 e 1 (valores menores = mais suave)
+    const smoothingFactor = 0.5;
+
+    // Processamento para a mão direita (vermelha)
+    if(trackBollHand.red) {
+
+     
+        
+        Game.players[0].mesh.hands.model.right.handModel.position.x = (trackBollHand.red.x / video.videoWidth) * 2 - 1;
+        Game.players[0].mesh.hands.model.right.handModel.position.y = -(trackBollHand.red.y / video.videoHeight) * 2 + 1;
+        Game.players[0].mesh.hands.model.right.handModel.position.z = Game.device.mobile ? trackBollHand.red.z < 0.10 ?  -0.5 : -1.8  : trackBollHand.red.z < 0.10 ? -1.8 : -0.5;
+
+        console.log(trackBollHand.red.z);
+        
+
+      
+        // Calcula a posição alvo normalizada
+        // const targetPosRed = new THREE.Vector3(
+        //     (trackBollHand.red.x / overlayCanvas.width) - 1,
+        //     -(trackBollHand.red.y / overlayCanvas.height) + 1,
+        //     normalizeZ(trackBollHand.red.z)
+        // );
+        
+        // // Atualiza suavemente a posição atual em direção à posição alvo
+        // Game.players[0].mesh.hands.model.right.handModel.position.lerp(targetPosRed, smoothingFactor);
+    }
+ 
+    // Processamento para a mão esquerda (azul)
+    if(trackBollHand.blue) {
+
+                
+        Game.players[0].mesh.hands.model.left.handModel.position.x = (trackBollHand.blue.x / video.videoWidth) * 2 - 1;
+        Game.players[0].mesh.hands.model.left.handModel.position.y = -(trackBollHand.blue.y / video.videoHeight) * 2 + 1;
+        Game.players[0].mesh.hands.model.left.handModel.position.z = Game.device.mobile ? trackBollHand.blue.z < 0.10 ?  -0.5 : -1.8  : trackBollHand.blue.z < 0.10 ? -1.8 : -0.5;
+        // Calcula a posição alvo normalizada
+        // const targetPosBlue = new THREE.Vector3(
+        //     (trackBollHand.blue.x / overlayCanvas.width) - 1,
+        //     -(trackBollHand.blue.y / overlayCanvas.height) + 1,
+        //     normalizeZ(trackBollHand.blue.z)
+        // );
+        
+        // // Atualiza suavemente a posição atual em direção à posição alvo
+        // Game.players[0].mesh.hands.model.left.handModel.position.lerp(targetPosBlue, smoothingFactor);
+    }
+
+}
+
+function createSkeletonLine() {
+    // Cada conexão gera 2 vértices (3 componentes cada)
+    const numVertices = handConnections.length * 2;
+    const positions = new Float32Array(numVertices * 3);
+  
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  
+    const material = new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 1, linecap: 'round', linejoin:  'round' }); // Cor verde (pode ser alterada)
+    const line = new THREE.LineSegments(geometry, material);
+  
+    // Adiciona ao mesmo grupo onde os landmarks estão (por exemplo, landmarkGroup)
+    landmarkGroup.add(line);
+    return line;
+}
+
+function updateSkeletonLine(line, dummies) {
+    const positions = line.geometry.attributes.position.array;
+    for (let i = 0; i < handConnections.length; i++) {
+      const [startIdx, endIdx] = handConnections[i];
+      // Pega a posição do primeiro ponto da conexão
+      positions[i * 6 + 0] = dummies[startIdx].position.x;
+      positions[i * 6 + 1] = dummies[startIdx].position.y;
+      positions[i * 6 + 2] = dummies[startIdx].position.z;
+      // Pega a posição do segundo ponto
+      positions[i * 6 + 3] = dummies[endIdx].position.x;
+      positions[i * 6 + 4] = dummies[endIdx].position.y;
+      positions[i * 6 + 5] = dummies[endIdx].position.z;
+    }
+    line.geometry.attributes.position.needsUpdate = true;
+}
   
 async function detectLoop() {
-
 
     if (!video || !(video instanceof HTMLVideoElement)) {
         console.warn("Elemento <video> inválido ou não fornecido.");
@@ -606,56 +1132,121 @@ async function detectLoop() {
         window._loopDebugger0 = true;
         DEBUGGER && console.log("[detectLoop]", Game);
     }
+
+    const delta = timeAnimarion - lastTime3;
+    lastTime3 = timeAnimarion;
+    fpsMediaPipe = 1000 / delta;
     
     requestAnimationFrame(detectLoop);
     frameCounter++;
 
     // Processa somente a cada 2 frames
-    if (frameCounter % 2 !== 0) return;
-
-    if (video.readyState >= 2 && handLandmarker) {
+    if (frameCounter % numberFrameLoopDetect !== 0) return;
+  
+    if (video.readyState >= 2 && handLandmarker && true) {
         const now = performance.now();
-        const results = handLandmarker.detectForVideo(video, now);
-    
+        let results = null;
+
+        results = handLandmarker.detectForVideo(video, now);
+        
+        if(results){
+            detectMethod = 'client';
+            window._hiddenHands = false;
+        }
+
+        if(!results && window.webSocketData && window.webSocketData.status && window.webSocketData.status == 'hand_detected') {
+            results = structuredClone(window.webSocketData);
+            detectMethod = 'webSocket';
+            window._hiddenHands = false;
+        }
+
+        if(!results){
+            detectMethod = 'none';
+            window.webSocketData.landmarks = [];
+            
+          
+            if(typeof _hiddenHands == 'undefined' || !window._hiddenHands){
+                setTimeout(() => {
+                    spheresHands[0].mesh.visible = false;
+                    spheresHands[0].skeleton.visible = false;
+                    spheresHands[1].mesh.visible = false;
+                    spheresHands[1].skeleton.visible = false; 
+                }, timeHiddeHands);
+                window._hiddenHands = true;
+            }
+       
+            return;
+        }
+
         // Ajusta o canvas ao tamanho do vídeo
         overlayCanvas.width = video.videoWidth;
         overlayCanvas.height = video.videoHeight;
         ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
 
+        // Função auxiliar para verificar se há resultados de detecção para um determinado label
+        const isHandDetected = (handLabel) => {
+            try {
+                return results.landmarks.some((lm, i) => {
+                    return results.handednesses?.[i]?.[0]?.categoryName === handLabel;
+                });
+            } catch (error) {
+                console.log(error, results);
+            }
+        };
+
+        // Verifica a detecção para cada mão
+        const leftDetected = isHandDetected("Left");
+        const rightDetected = isHandDetected("Right");
+
+        // Para a mão esquerda (índice 0)
+        if (spheresHands[0].mesh.visible && !leftDetected) {
+            spheresHands[0].mesh.visible = false;
+            spheresHands[0].skeleton.visible = false;
+        } else if (!spheresHands[0].mesh.visible && leftDetected) {
+            spheresHands[0].mesh.visible = true;
+            spheresHands[0].skeleton.visible = true;
+        }
+
+        // Para a mão direita (índice 1)
+        if (spheresHands[1].mesh.visible && !rightDetected) {
+            spheresHands[1].mesh.visible = false;
+            spheresHands[1].skeleton.visible = false;
+        } else if (!spheresHands[1].mesh.visible && rightDetected) {
+            spheresHands[1].mesh.visible = true;
+            spheresHands[1].skeleton.visible = true;
+        }
+
         // Agora desenha os landmarks com a rotação aplicada ao canvas
         if (results.landmarks && results.landmarks.length > 0) {
-      
-            
             Game.players[0].resultDetectForVideo = results;
-
-            
-            // console.log(results.handednesses[0][0].categoryName);
-        
             results.landmarks.forEach((landmarks, i) => {
                 const handLabel = results.handednesses?.[i]?.[0]?.categoryName || "Unknown";
                 const handIndex = results.handednesses?.[i]?.[0]?.index || 0;
+                scoreHand = results.handednesses?.[i]?.[0]?.score || 0;
                 const color = handLabel === "Left" ? "blue" : "green";
-
-                // console.log(results.handednesses[i][0]?.categoryName);
-                
-
                 drawPointsCanvas(landmarks, overlayCanvas, ctx, color, handLabel, handIndex, results);
-                updateHandPosition(Game.players[0].mesh.rightHand, landmarks, results, radius, handIndex);
-             
-                // if(handIndex === 1) {
-                //     updateHandPosition(Game.players[0].mesh.rightHand, landmarks, results, radius);
-                // }
-
-                // if(handIndex === 0) {
-                //     updateHandPosition(Game.players[0].mesh.leftHand, landmarks, results, radius);
-                // }
-                
+                updateHandPosition(null, landmarks, results, radius, handIndex);
             });
-        }    
+        }  
     }
 
+    // <-- Aqui, logo após atualizar os landmarks, chamamos a atualização dos skeletons -->
+    if (spheresHands[0].mesh.visible) {
+        updateSkeletonLine(spheresHands[0].skeleton, spheresHands[0].dummies);
+    }
+    if (spheresHands[1].mesh.visible) {
+        updateSkeletonLine(spheresHands[1].skeleton, spheresHands[1].dummies);
+    }
+
+
+    return;
+
+    ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+    ctx.fillText(`fps: ${fps.toFixed(2)}`, overlayCanvas.width - 50, 10);  // Posição ajustada para o próximo valor
+
     // preprocessFrame();
-    
+    // detecterBolinha();
+    // setPositionBollHandTrack();
 }
 
 // Pré-processamento do frame da webcam
@@ -683,6 +1274,28 @@ async   function preprocessFrame() {
     }
 
     ctxPreproceImage.putImageData(imageData, 0, 0);
+
+}
+
+function detecterBolinha() {
+    // 1. Crie um canvas temporário
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = video.videoWidth;
+    tempCanvas.height = video.videoHeight;
+    const tempCtx = tempCanvas.getContext('2d', { willReadFrequently: true });
+
+    // 2. Desenhe o frame atual do vídeo
+    tempCtx.drawImage(video, 0, 0);
+
+    // 3. Pegue os dados de pixel
+    const imageDataTmp = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+    worker.postMessage({
+        type: 'process',
+        data: imageDataTmp.data.buffer,
+        width: tempCanvas.width,
+        debug:true,
+        flip: !Game.device.mobile
+      }, [imageDataTmp.data.buffer]);
 }
 
 function drawPointsCanvas(landmarks, overlayCanvas, ctx, color, handLabel, handIndex, results) {
@@ -958,7 +1571,6 @@ function tamanhoVetor(v) {
     return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
 }
 
-
 /**
  * Calcula a distância entre dois vetores 3D (pontos no espaço)
  * @param {{x: number, y: number, z: number}} v1
@@ -1055,12 +1667,12 @@ function rotate3D(point, angles) {
     return { x: x3, y: y3, z: z3 };
 }
 
-function setVelocityXZY({vVelocity, keys, delta}){
+function setVelocityXZY({vVelocity, keys, delta, speed=0.01}){
     vVelocity.set(0, 0, 0);
-    if (keys['KeyW']) vVelocity.z += 5 * delta;
-    if (keys['KeyS']) vVelocity.z -= 5 * delta;
-    if (keys['KeyA']) vVelocity.x -= 5 * delta;
-    if (keys['KeyD']) vVelocity.x += 5 * delta;
+    if (keys['KeyW']) vVelocity.z += speed * delta;
+    if (keys['KeyS']) vVelocity.z -= speed * delta;
+    if (keys['KeyA']) vVelocity.x -= speed * delta;
+    if (keys['KeyD']) vVelocity.x += speed * delta;
     return {vVelocity, keys, delta}
 }
 
@@ -1100,7 +1712,7 @@ function handlerTouchmove(event){
 }
 
 function handlerKeysTouch(event){
-    if(Game.divice.mobile){
+    if(Game.device.mobile){
         const forwardBtn = document.getElementById("move-forward");
         const backwardBtn = document.getElementById("move-backward");
       
@@ -1147,7 +1759,7 @@ function handlerDevicemotion(event){
   console.log("Rot rate alpha:", rotRate.alpha, "°/s");
 }
 
-function uploadGLTF(filegltf, callback){
+function uploadGLTF_deprecated(filegltf, callback){
     console.log("[uploadGLTF]");
     
     const loader = new GLTFLoader();
@@ -1187,6 +1799,46 @@ function uploadGLTF(filegltf, callback){
         if(typeof callback === 'function') callback({
             handModel,
             handBones,
+            bones
+        });
+
+    }, undefined, (error) => {
+      console.error('Erro ao carregar o modelo da mão:', error);
+    });
+}
+
+function uploadGLTF(filegltf, callback, position = {x :0, y: 0, z: 0}){
+    console.log("[uploadGLTF]", filegltf);
+    
+    const loader = new GLTFLoader();
+    let model;
+    
+    return loader.load(`/static/models/${filegltf}`, (gltf) => {
+        model = gltf.scene;
+        model.scale.set(1, 1, 1);
+        model.rotation.set(
+            THREE.MathUtils.degToRad(0), // pitch
+            THREE.MathUtils.degToRad(0), // yaw 
+            THREE.MathUtils.degToRad(0) // roll
+        );
+        model.castShadow = true;
+        model.receiveShadow = true;
+        const axesHelper = new THREE.AxesHelper(1);
+        DEBUGGER_OBJECTS && model.add(axesHelper);
+        model.position.set(position.x, position.y, position.z); // Em relação à câmera
+
+        const modelBones = {};
+        gltf.scene.traverse((obj) => {
+            if (obj.isBone) {
+                modelBones[obj.name] = obj;
+            }
+        });
+
+        const bones = getBonesFromModel(model);
+
+        if(typeof callback === 'function') callback({
+            model,
+            modelBones,
             bones
         });
 
@@ -1262,7 +1914,6 @@ function rotateBoneFromLandmarks(skeleton, boneName, landmarks, startIndex, endI
 }
 
 function updateHandSkeletonFromLandmarks(bones, landmarks, model, boneMap = boneMapRight, scale = 4) {
-
 
     if (!bones || !landmarks || landmarks.length !== 21) return;
 
@@ -1378,7 +2029,7 @@ function updateHandSkeletonFromLandmarks(bones, landmarks, model, boneMap = bone
 
     // 🔁 Rotação baseada em landmarks[5] → [6]
     const bone = bones['mixamorigLeftHandIndex1'];
-    if (bone && landmarks[5] && landmarks[6] && false) {
+    if (bone && landmarks[5] && landmarks[6] && true) {
         const scale = 4; // ou o que estiver sendo usado na sua função
 
         let fromVec = new THREE.Vector3(
@@ -1427,10 +2078,10 @@ function updateHandSkeletonFromLandmarks(bones, landmarks, model, boneMap = bone
     }
 
  
-    return
+  
       // 🔁 Rotação baseada em landmarks[5] → [6]
       const bone8 = bones['mixamorigLeftHandIndex4'];
-      if (bone && landmarks[7] && landmarks[8] && false) {
+      if (bone && landmarks[7] && landmarks[8] && true) {
           const scale = 4; // ou o que estiver sendo usado na sua função
   
           const fromVec = new THREE.Vector3(
@@ -1546,17 +2197,31 @@ function getBonesFromModel(model) {
     return bones;
 }
 
-function animate() {
+function GLTFLoaderWorker() {
+    // Carregar GLTF local e enviar pro worker
+    const loader = new GLTFLoader();
+    loader.load('/static/models/ClearcoatSphere.gltf', (gltf) => {
+    const json = gltf.scene.toJSON();
+    worker.postMessage({ type: 'gltf', model: json });
+    });
+}
+
+function animate(time) {
+    // Por padrão, requestAnimationFrame() roda a 60 FPS, sincronizado com a taxa do display.
     // requestAnimationFrame(animate);
-    const delta = Game.clock.getDelta();
-    fps = 1 / delta;
-    lastTime = delta;
+    timeAnimarion = time;
+    const delta = timeAnimarion - lastTime4;
+    lastTime4 = timeAnimarion;
+
+    fpsThree =  1000 / delta;
+
 
     setVelocityXZY({vVelocity, keys,  delta});
 
     Game.controls.moveRight(vVelocity.x);
     Game.controls.moveForward(vVelocity.z);
 
+    /*
     const cubePosition = physicsCube.position;
     if (getControlsPosition(Game.controls).distanceTo(cubePosition) < 1.5) {
         // Empurra o cubo com base na direção do jogador
@@ -1566,26 +2231,92 @@ function animate() {
     // Atualiza a posição do cubo com inércia e atrito
     physicsCube.position.addScaledVector(cubeVelocity, delta);
     cubeVelocity.multiplyScalar(0.9); // atrito
-
+    */
     // loopHandLandmarker();
     // Processa o quadro da câmera
     // processVideoFrame();
 
-    if (Game.scene && Game.camera && Game.renderer) {
-        Game.renderer.render(Game.scene, Game.camera);
-    }
 
-    ctx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
-    ctx.fillText(`fps: ${fps.toFixed(2)}`, overlayCanvas.width - 50, 10);  // Posição ajustada para o próximo valor
+    const position = Game.camera.position;
+    const rotation =  Game.camera.rotation;
+    worker.postMessage({
+      type: 'camera',
+      position: { x: position.x, y: position.y, z: position.z },
+      rotation: { x: rotation.x, y: rotation.y, z: rotation.z },
+    });
+
+    Game.controlsMobile && Game.controlsMobile.update();
+
+
+
+    // moveSpotLight(spotLightTest, objectTest, { amplitude: 10, speed: 0.2, helper: spotLightTestHelper });
+    swingSpotLight(spotLightTest, { amplitude: Math.PI/6, frequency: 1.5, phase: 0, helper: spotLightTestHelper });
+
+    if (Game.scene && Game.camera && Game.renderer) {
+        let needsRender = true;
+        if(needsRender){
+            const activeCamera = useSecondCamera ? Game.cameraTop : Game.camera;
+            Game.renderer.render(Game.scene, activeCamera);
+            needsRender = false;
+        }
+    }
     
 }
 
-await bootstrap();
+GLTFLoaderWorker();
 
-Game.renderer.setAnimationLoop(animate);
+/*
+await requestWakeLock();
+*/
+
+Game.renderer.setAnimationLoop((timeAnimation) => {
+    animate(timeAnimation);
+    // Envia imagem apenas a cada 10 frames
+  if (frameCounter % 2 === 0) {
+    captureAndSendImage(timeAnimation, video);
+  }
+
+});
+
+bootstrap();
 
 window.addEventListener('DOMContentLoaded', handlerKeysTouch);
 window.addEventListener('resize', handlerResize);
-document.addEventListener("touchstart", handlertouchstart);
+document.addEventListener("touchstart", handlertouchstart, { passive: false });
 document.addEventListener("touchmove", handlerTouchmove);
 window.addEventListener("devicemotion", handlerDevicemotion, true);
+
+window.addEventListener('keydown', (e) => {
+    if (e.key === 'c') {
+      useSecondCamera = !useSecondCamera;
+      console.log('Switched to', useSecondCamera ? 'Camera 2' : 'Camera 1');
+    }
+});
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'e') {
+    console.log('Exibindo instruções');
+  
+    Game.controls.unlock();
+    instructions.style.display = 'none'; // Não exibe instruções no mobile
+    
+  }
+});
+
+Game.renderer.xr?.addEventListener('sessionstart', async() => {
+   
+    // try {
+    //     const session = Game.renderer.xr.getSession();
+    //       // cria camada de render usando WebGL do canvas offscreen
+    //       const gl = Game.renderer.getContext();
+    //       await gl.makeXRCompatible();
+    //       const layer = new XRWebGLLayer(session, gl);
+    //       session.updateRenderState({ baseLayer: layer });
+      
+    // } catch (error) {
+    //     alert(JSON.stringify(error.message));
+    // }
+   
+    // worker.postMessage({ type: 'xr-session', session }, [session]);
+});
+

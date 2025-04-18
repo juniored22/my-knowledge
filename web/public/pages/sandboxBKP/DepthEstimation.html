@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>MIDaS com Webcam</title>
+    <!-- <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/depth-estimation"></script> -->
+
+    <!-- Require the peer dependencies of depth-estimation. -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+
+<!-- You must explicitly require a TF.js backend if you're not using the TF.js union bundle. -->
+<!-- WebGL is the recommended backend. -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/depth-estimation"></script>
+    <style>
+        canvas, video {
+            display: block;
+            margin: 10px auto;
+            max-width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+<video id="video" autoplay playsinline muted width="640" height="480"></video>
+<canvas id="depthCanvas" width="640" height="480"></canvas>
+
+<script>
+(async function() {
+
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('depthCanvas');
+    const ctx = canvas.getContext('2d');
+
+
+
+    const model = depthEstimation.SupportedModels.ARPortraitDepth;
+    const estimatorConfig = {
+      outputDepthRange: [0, 1]
+    };
+    // const estimator = await depthEstimation.createEstimator(model);
+    const estimator = await depthEstimation.createEstimator(model, estimatorConfig);
+   
+    // Carregar o modelo MIDaS (DepthEstimation)
+    // const model = await depthEstimation.createEstimator(depthEstimation.SupportedModels.DepthEstimation);
+    
+    // Acessar a webcam
+    navigator.mediaDevices.getUserMedia({ video: true })
+        .then((stream) => {
+            video.srcObject = stream;
+        });
+
+        video.style.transform =  'scaleX(-1)';
+
+    video.addEventListener('loadeddata', estimateDepth);
+
+    async function estimateDepth() {
+
+        const estimationConfig = {flipHorizontal: true,      inputResolution: { width: 256, height: 256 },
+            modelUrl: undefined,
+            minDepth: 0.001,
+            maxDepth: 10};
+        const depthMap = await estimator.estimateDepth(video, estimationConfig);
+
+        const depthData = await depthMap.toCanvasImageSource();
+
+        ctx.drawImage(depthData, 0, 0, canvas.width, canvas.height);
+
+        requestAnimationFrame(estimateDepth);
+    }
+
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,147 @@
+<video id="video" autoplay playsinline width="640" height="480" style="display:none;"></video>
+<canvas id="canvas" width="640" height="480"></canvas>
+
+<script>
+// 🎨 Converte RGB para HSV
+function rgbToHsv(r, g, b) {
+  r /= 255; g /= 255; b /= 255;
+  const max = Math.max(r, g, b), min = Math.min(r, g, b);
+  const d = max - min;
+  let h = 0, s = max === 0 ? 0 : d / max, v = max;
+
+  if (d !== 0) {
+    if (max === r) h = ((g - b) / d + (g < b ? 6 : 0));
+    else if (max === g) h = ((b - r) / d + 2);
+    else h = ((r - g) / d + 4);
+    h *= 60;
+  }
+  return { h, s: s * 100, v: v * 100 };
+}
+
+// 📐 Convex Hull (Graham Scan)
+function convexHull(points) {
+  if (points.length < 3) return points;
+
+  points.sort((a, b) => a.x === b.x ? a.y - b.y : a.x - b.x);
+  const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+
+  const lower = [];
+  for (const p of points) {
+    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0)
+      lower.pop();
+    lower.push(p);
+  }
+
+  const upper = [];
+  for (let i = points.length - 1; i >= 0; i--) {
+    const p = points[i];
+    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0)
+      upper.pop();
+    upper.push(p);
+  }
+
+  upper.pop();
+  lower.pop();
+  return lower.concat(upper);
+}
+
+// 🎯 Detecta bolinha por faixa HSV
+function detectarBolinhaHSV(data, width, filtroHSV) {
+  const pontos = [];
+
+  for (let i = 0; i < data.length; i += 4 * 4) { // Pula pixels para acelerar
+    const r = data[i], g = data[i + 1], b = data[i + 2];
+    const pixelIndex = i / 4;
+    const x = pixelIndex % width;
+    const y = Math.floor(pixelIndex / width);
+    const hsv = rgbToHsv(r, g, b);
+
+    if (filtroHSV(hsv.h, hsv.s, hsv.v)) {
+      pontos.push({ x, y });
+    }
+  }
+
+  if (pontos.length < 50) return null;
+
+  const area = pontos.length;
+  const raio = Math.sqrt(area / Math.PI);
+  const diametro = 2 * raio;
+  const x = pontos.reduce((sum, p) => sum + p.x, 0) / area;
+  const y = pontos.reduce((sum, p) => sum + p.y, 0) / area;
+  const z = 1 / raio;
+
+  const hull = convexHull(pontos);
+  return { x, y, z, raio, area, diametro, pontos: hull };
+}
+
+// 🖼️ Desenha a bolinha e UI
+function desenharBolinha(ctx, bolinha, cor = 'lime', offsetY = 20) {
+  const { x, y, z, raio, area, diametro, pontos } = bolinha;
+
+  ctx.beginPath();
+  ctx.moveTo(pontos[0].x, pontos[0].y);
+  for (let i = 1; i < pontos.length; i++) {
+    ctx.lineTo(pontos[i].x, pontos[i].y);
+  }
+  ctx.closePath();
+  ctx.strokeStyle = cor;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = cor === 'blue' ? 'rgba(0,0,255,0.1)' : 'rgba(0,255,0,0.1)';
+  ctx.fill();
+
+  ctx.fillStyle = "black";
+  ctx.font = "14px Arial";
+  ctx.fillText(`🎯 ${cor.toUpperCase()}`, 10, offsetY);
+  ctx.fillText(`x: ${x.toFixed(1)} px`, 10, offsetY + 16);
+  ctx.fillText(`y: ${y.toFixed(1)} px`, 10, offsetY + 32);
+  ctx.fillText(`z: ${z.toFixed(4)} (estimado)`, 10, offsetY + 48);
+  ctx.fillText(`Raio: ${raio.toFixed(1)} px`, 10, offsetY + 64);
+  ctx.fillText(`Área: ${area} px²`, 10, offsetY + 80);
+  ctx.fillText(`Diâmetro: ${diametro.toFixed(1)} px`, 10, offsetY + 96);
+}
+
+// 📷 Inicia câmera e processa canvas com downscale
+async function initCameraAndCanvas() {
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+
+  const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+  video.srcObject = stream;
+
+  video.onloadeddata = () => {
+    const tempCanvas = document.createElement('canvas');
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCanvas.width = 640; // menor resolução para eficiência
+    tempCanvas.height = 480;
+
+    function render() {
+      tempCtx.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+      const imageData = tempCtx.getImageData(0, 0, tempCanvas.width, tempCanvas.height);
+      const data = imageData.data;
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height); // fundo em alta
+
+      const redFilter = (h, s, v) =>
+        ((h < 15 || h > 345) && s > 40 && v > 40);
+
+      const blueFilter = (h, s, v) =>
+        (h > 190  && h < 210  && s > 60  && v > 80);
+
+      const bolinhaVermelha = detectarBolinhaHSV(data, tempCanvas.width, redFilter);
+      const bolinhaAzul = detectarBolinhaHSV(data, tempCanvas.width, blueFilter);
+
+      if (bolinhaVermelha) desenharBolinha(ctx, bolinhaVermelha, 'lime', 20);
+      if (bolinhaAzul) desenharBolinha(ctx, bolinhaAzul, 'blue', 150);
+
+      requestAnimationFrame(render);
+    }
+
+    render();
+  };
+}
+
+initCameraAndCanvas();
+</script>

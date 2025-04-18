@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>MediaPipe Vision + Three.js: Desenhar mão inteira</title>
+
+  <!-- Carrega Three.js de modo não-module -->
+
+</head>
+<body style="margin:0; padding:0; overflow:hidden;">
+  <!-- Vídeo oculto para receber a webcam -->
+  <video id="videoElement" autoplay playsinline style="display:none;"></video>
+
+  <!-- Canvas onde Three.js desenha -->
+  <canvas id="webglCanvas"></canvas>
+
+  <script type="module">
+
+import * as THREE                           from 'https://esm.sh/three';
+    /***************************************************************
+     * 1) Import da lib Vision (HandLandmarker) via ESM local
+     ***************************************************************/
+    import {
+      FilesetResolver,
+      HandLandmarker
+    } from "/libs/@mediapipe/tasks-vision/vision_bundle.mjs";
+
+    /***************************************************************
+     * 2) Variáveis e elementos
+     ***************************************************************/
+    let handLandmarker = null;
+    const videoElement = document.getElementById("videoElement");
+    const canvas3D = document.getElementById("webglCanvas");
+    let lastVideoTime = -1; // Para controle no loop
+
+    /***************************************************************
+     * 3) Configuração Three.js
+     ***************************************************************/
+    const scene = new THREE.Scene();
+
+    // Câmera perspectiva
+    const camera = new THREE.PerspectiveCamera(
+      70,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      1000
+    );
+    camera.position.z = 3; // afasta a câmera
+
+    const renderer = new THREE.WebGLRenderer({ canvas: canvas3D });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+
+    // Ajusta se a janela é redimensionada
+    window.addEventListener("resize", () => {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    /***************************************************************
+     * 4) Criando objetos 3D: Cubo e pontos da mão
+     ***************************************************************/
+    // Cubo no fundo (z = -2)
+    const cubeGeometry = new THREE.BoxGeometry();
+    const cubeMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const cube = new THREE.Mesh(cubeGeometry, cubeMaterial);
+    cube.position.z = -2;
+    scene.add(cube);
+
+    // Vamos desenhar 21 esferas (uma para cada landmark da mão)
+    // Cada uma começa "fora" da vista (y = -999)
+    const NUM_LANDMARKS = 21;
+    const handSpheres = [];
+    for (let i = 0; i < NUM_LANDMARKS; i++) {
+      const sphereGeo = new THREE.SphereGeometry(0.03, 8, 8);
+      const sphereMat = new THREE.MeshBasicMaterial({ color: 0x00ff00 });
+      const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+      sphere.position.set(0, -999, 0);
+      scene.add(sphere);
+      handSpheres.push(sphere);
+    }
+
+    /***************************************************************
+     * 5) Raycaster para "clicar" no cubo e posicionar esferas
+     ***************************************************************/
+    const raycaster = new THREE.Raycaster();
+    const pointer = new THREE.Vector2();
+    // Um plano em Z=0 para projetar os landmarks
+    const planeZ0 = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+
+    // Função que converte (x,y) [0..1] -> coords de tela [-1..1]
+    // Faz interseção no planoZ0 e retorna o Vector3 de posição
+    function projectLandmarkToPlane(normX, normY) {
+      pointer.x = (normX * 2) - 1;
+      pointer.y = -((normY * 2) - 1);
+
+      raycaster.setFromCamera(pointer, camera);
+      const intersectPos = new THREE.Vector3();
+      raycaster.ray.intersectPlane(planeZ0, intersectPos);
+      return intersectPos;
+    }
+
+    // Para "clicar" no cubo usando só o dedo indicador
+    function raycastCubeFromLandmark(normX, normY) {
+      pointer.x = (normX * 2) - 1;
+      pointer.y = -((normY * 2) - 1);
+
+      raycaster.setFromCamera(pointer, camera);
+      const intersects = raycaster.intersectObject(cube, true);
+      if (intersects.length > 0) {
+        cube.material.color.set(0xff0000);
+      } else {
+        cube.material.color.set(0xffffff);
+      }
+    }
+
+    /***************************************************************
+     * 6) Inicializar HandLandmarker
+     ***************************************************************/
+    async function initHandLandmarker() {
+      const vision = await FilesetResolver.forVisionTasks(
+        "/libs/@mediapipe/tasks-vision/wasm" 
+      );
+
+      handLandmarker = await HandLandmarker.createFromOptions(vision, {
+        baseOptions: {
+          modelAssetPath: "/libs/@mediapipe/tasks-vision/hand_landmarker.task",
+          delegate: "GPU"
+        },
+        runningMode: "VIDEO",
+        numHands: 1, // detectar 1 mão
+        minHandDetectionConfidence: 0.5,
+        minHandTrackingConfidence: 0.5
+      });
+
+      console.log("HandLandmarker inicializado com sucesso.");
+    }
+
+    /***************************************************************
+     * 7) Acessar webcam via getUserMedia
+     ***************************************************************/
+    async function startVideo() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        videoElement.srcObject = stream;
+        await videoElement.play();
+        console.log("Vídeo iniciado.");
+        requestAnimationFrame(processVideoFrame);
+      } catch (err) {
+        console.error("Erro ao acessar câmera:", err);
+      }
+    }
+
+    /***************************************************************
+     * 8) Loop de detecção: desenha pontos da mão e faz Raycast cubo
+     ***************************************************************/
+    async function processVideoFrame() {
+      if (videoElement.readyState === HTMLMediaElement.HAVE_ENOUGH_DATA) {
+        const nowInMs = Date.now();
+        if (videoElement.currentTime !== lastVideoTime) {
+          lastVideoTime = videoElement.currentTime;
+
+          // Executa detecção
+          const results = handLandmarker.detectForVideo(videoElement, nowInMs);
+
+          if (results.landmarks && results.landmarks.length > 0) {
+            // Pegamos a primeira mão
+            const firstHand = results.landmarks[0]; 
+            // firstHand é um array de 21 landmarks: [{x,y,z}, ...]
+
+            // Para cada landmark, projetar no planoZ0 e mover a esfera
+            for (let i = 0; i < NUM_LANDMARKS; i++) {
+              const { x, y } = firstHand[i]; 
+              const pos = projectLandmarkToPlane(x, y);
+              handSpheres[i].position.copy(pos);
+            }
+
+            // Raycast para o cubo usando o dedo indicador (indexTip = 8)
+            const indexTip = firstHand[8];
+            raycastCubeFromLandmark(indexTip.x, indexTip.y);
+          } else {
+            // Se não tem mão, joga as esferas para fora da tela, cubo branco
+            for (let i = 0; i < NUM_LANDMARKS; i++) {
+              handSpheres[i].position.set(0, -999, 0);
+            }
+            cube.material.color.set(0xffffff);
+          }
+        }
+      }
+
+      requestAnimationFrame(processVideoFrame);
+    }
+
+    /***************************************************************
+     * 9) Loop de animação 3D (render)
+     ***************************************************************/
+    function animate() {
+      requestAnimationFrame(animate);
+      renderer.render(scene, camera);
+    }
+    animate();
+
+    /***************************************************************
+     * 10) Execução principal
+     ***************************************************************/
+    (async () => {
+      await initHandLandmarker();
+      await startVideo();
+    })();
+  </script>
+</body>
+</html>

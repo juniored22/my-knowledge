@@ -1,0 +1,13 @@
+{
+  "name": "my-knowledge",
+  "version": "1.0.0",
+  "description": "my knowledge",
+  "main": "index.js",
+  "scripts": {
+    "start": "cd app && cargo run > backend.log 2>&1",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
+}

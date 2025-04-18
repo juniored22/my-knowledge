@@ -1,0 +1,22 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.13s
+     Running `target\debug\app.exe`
+PollEvented { io: Some(TcpListener { addr: 0.0.0.0:3000, socket: 376 }) }
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+Lendo arquivo HTML de: C:\Users\Juniored\Documents\my-knowledge\app\../web/public/index.html
+^C

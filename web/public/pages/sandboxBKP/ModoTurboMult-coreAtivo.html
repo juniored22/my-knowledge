@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Modo TURBO Multi-Core</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+      body {
+        background: #111;
+        color: lime;
+        font-family: monospace;
+        padding: 20px;
+      }
+      .explanation {
+        color: #ccc;
+        margin-top: 2rem;
+        line-height: 1.4;
+        font-size: 14px;
+      }
+      .warning {
+        color: red;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>🔥 Modo TURBO MULTI-CORE ATIVO</h2>
+    <div id="core-info">Detectando núcleos...</div>
+    <div id="stats">Aguardando...</div>
+
+    <div class="explanation">
+      <h3>🧠 O que é esse teste?</h3>
+      <p>
+        Este teste cria <strong>vários Web Workers (um por núcleo)</strong> que rodam loops pesados
+        para simular o uso real da CPU em um cenário de processamento intenso.
+      </p>
+      <p>
+        A main thread monitora o tempo médio de resposta dos workers (lag) para detectar
+        possíveis quedas de performance e throttling (limitação térmica).
+      </p>
+      <p>
+        Útil para entender como o navegador distribui carga entre núcleos lógicos em celulares
+        ou desktops.
+      </p>
+    </div>
+
+    <script>
+      const statsDiv = document.getElementById('stats');
+      const cores = navigator.hardwareConcurrency || 4;
+      document.getElementById('core-info').textContent = `🧠 Núcleos detectados: ${cores}`;
+
+      const workers = [];
+      const lags = new Array(cores).fill(0);
+      const lagHistory = Array.from({ length: cores }, () => []);
+      const lastPingTimes = new Array(cores).fill(0);
+
+      // Código do worker como texto
+      const workerCode = `
+        onmessage = function (e) {
+          if (e.data === 'ping') postMessage({ type: 'pong', id: e.data.id });
+        };
+
+        let dummy = 0;
+        function burnCPU() {
+          const start = performance.now();
+          while (performance.now() - start < 16) {
+            for (let i = 0; i < 100000; i++) {
+              dummy += Math.sqrt(i + Math.random());
+            }
+          }
+          setTimeout(burnCPU, 0);
+        }
+        burnCPU();
+      `;
+
+      // Cria os workers
+      for (let i = 0; i < cores; i++) {
+        const blob = new Blob([workerCode], { type: "application/javascript" });
+        const worker = new Worker(URL.createObjectURL(blob));
+        worker.id = i;
+        worker.onmessage = function (e) {
+          const now = performance.now();
+          const lag = now - lastPingTimes[e.data.id];
+          lags[e.data.id] = 0.9 * lags[e.data.id] + 0.1 * lag;
+          lagHistory[e.data.id].push(lag);
+          if (lagHistory[e.data.id].length > 60) lagHistory[e.data.id].shift();
+        };
+        workers.push(worker);
+      }
+
+      // Ping todos os workers periodicamente
+      setInterval(() => {
+        const now = performance.now();
+        workers.forEach((worker, i) => {
+          lastPingTimes[i] = now;
+          worker.postMessage({ type: 'ping', id: i });
+        });
+      }, 500); // a cada 0.5s
+
+      // Monitoramento da performance
+      function monitorLoop() {
+        const avgLags = lags.map(l => l.toFixed(1));
+        const minLags = lagHistory.map(l => Math.min(...l).toFixed(1));
+        const maxLags = lagHistory.map(l => Math.max(...l).toFixed(1));
+        const avgCpuUsage = lags.map(lag => Math.min((lag / 16.6) * 100, 100).toFixed(0));
+
+        let html = '';
+        for (let i = 0; i < cores; i++) {
+          html += `
+            Núcleo ${i + 1}:<br>
+            - Lag: ${avgLags[i]} ms<br>
+            - Min: ${minLags[i]} ms | Max: ${maxLags[i]} ms<br>
+            - Uso estimado: ${avgCpuUsage[i]}%<br><br>
+          `;
+        }
+
+        const throttled = lags.some(lag => lag > 100);
+        if (throttled) {
+          html += `<span class="warning">⚠️ Throttling detectado em um ou mais núcleos!</span>`;
+        }
+
+        statsDiv.innerHTML = html;
+        requestAnimationFrame(monitorLoop);
+      }
+
+      monitorLoop();
+    </script>
+  </body>
+</html>

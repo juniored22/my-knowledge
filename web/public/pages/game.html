@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <link rel="icon" href="/static/favicon.ico" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>Jogo em Primeira Pessoa</title>
   <style>
@@ -34,14 +35,15 @@
     }
     .infoSystem{
       position: absolute;
+      right: 0;
+      background: rgba(0,0,0,0.5);
     }
 
     #preprocessed{
       z-index: 1;
       position: absolute;
       top: auto;
-      right: 0;
-      display: none;
+      left: 0;
     }
 
 
@@ -58,12 +60,11 @@
   
 
   <div>
+    <canvas id="main-canvas" width="800" height="600"></canvas>
     <video id="webcam" autoplay muted playsinline style="position: absolute; top: 0; left: 0; z-index: 0;"></video>
-    <!-- <canvas id="overlay" style="position: absolute; top: 0; left: 0; z-index: 1;border: 1px solid red;"></canvas> -->
     <canvas id="overlay" style="position: absolute; top: 0; left: 0; z-index: 1;border: 1px solid red;"></canvas>
-
-    <canvas id="preprocessed" width="640" height="480" style="border: 1px solid green;"></canvas>
+    <canvas id="preprocessed" width="160" height="120" style="border: 1px solid green; bottom: 0;"></canvas>
   </div>
-  <script type="module" src="/static/modules/Game.mjs?v=5"></script>
+  <script type="module" src="/static/modules/Game.mjs?v=7"></script>
 </body>
 </html>

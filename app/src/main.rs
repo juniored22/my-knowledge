@@ -8,17 +8,12 @@ use routes::all_routes;
 use axum::{routing::{get}};
 use tower_http::services::ServeDir;
 
-
-
-
 #[tokio::main]
 async fn main() {
     // build our application with a single route
     let app = all_routes()
     .route("/comandos",     get(|| async { 
-
         r#"Use o comando:
-
         curl -X POST http://localhost:3000/users \
           -H "Content-Type: application/json" \
           -d '{"name":"João", "email":"joao@email.com"}'

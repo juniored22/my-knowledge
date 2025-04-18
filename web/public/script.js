@@ -202,11 +202,11 @@ function toggleWebcam() {
                 height: { ideal: getUserMediaWidthHeight.y }                // altura desejada
             },
          }).then((stream) => {
-        video.srcObject = stream;
-        video.addEventListener("loadeddata", predictWebcam);
-        if(!game.scene) threeFaceMash();
-        
-    });
+            video.srcObject = stream;
+            video.addEventListener("loadeddata", predictWebcam);
+            if(!game.scene) threeFaceMash();
+            
+        });
     }
 }
 
@@ -222,9 +222,6 @@ async function predictWebcam() {
     webcamCanvas.width = document.querySelector('#webcam').width
     webcamCanvas.height = document.querySelector('#webcam').height;
     
-
-    
-
 
     if (runningMode !== "VIDEO") {
         runningMode = "VIDEO";
@@ -248,6 +245,12 @@ async function predictWebcam() {
     if (webcamRunning) {
         requestAnimationFrame(predictWebcam);
     }
+
+    if(typeof __execult === 'undefined' || !__execult){
+        window.__execult = true;;
+        meshTrhee();
+    }
+    
 
     if (results.faceLandmarks && results.faceLandmarks.length > 0) {
 
@@ -361,7 +364,9 @@ async function predictWebcam() {
         } else {
             showAllFace(); // fecha face olhos
         }
+
     }
+
 }
 
 //  Exemplo de função para verificar proximidade dos pontos

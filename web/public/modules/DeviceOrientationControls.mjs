@@ -1,126 +1,183 @@
-// DeviceOrientationControls.js
-import * as THREE from 'https://esm.sh/three';
+import { Object3D, MathUtils, Quaternion, Vector3, Euler } from "https://esm.sh/three";
+
+const q1 = new Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // - PI/2 (90 degrees) around the x-axis
 
 
+const zee = new Vector3(0, 0, 1);
+
+// Inside onScreen_OrientationChange() we are supposed to use window.orientation values, but it is now deprecated. {@link https://developer.mozilla.org/en-US/docs/Web/API/Screen/orientation}
+// Screen.orientation.type is used instead, available on the window.screen property {@link https://developer.mozilla.org/en-US/docs/Web/API/Window/screen}.
+const windowOrientation_map = {
+    270: MathUtils.degToRad(-90),
+    '-90': MathUtils.degToRad(-90),
+    90: MathUtils.degToRad(90),
+    0: 0,
+    null: 0,
+    undefined: 0
+};
+
+/**
+ * @author richt / http://richt.me
+ * @author WestLangley / http://github.com/WestLangley
+ * @author DenisVargas
+ *
+ * W3C Device Orientation control (http://w3c.github.io/deviceorientation/spec-source-orientation.html)
+ */
 export class DeviceOrientationControls {
-  constructor(camera) {
-    this.camera = camera;
-    this.enabled = true;
-
-    this.deviceQuaternion = new THREE.Quaternion();
-    this.screenTransform = new THREE.Quaternion();
-    this.worldTransform = new THREE.Quaternion(
-      //-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5) // Rotaciona -90° no eixo X para alinhar com o mundo
-      0, 0, 0,  Math.sqrt(0.5)
-    );
-    this.euler = new THREE.Euler();
-
-    // Indicador simples de que já iniciamos o listener após permissão
-    this.initialized = false;
-
-    // Bind do método para manter o "this" correto no eventListener
-    this.setOrientation = this.setOrientation.bind(this);
-  }
-
-  /**
-   * Solicita permissão de acesso aos eventos de orientação
-   * (relevante apenas em iOS 13+, caso contrário, não é necessário).
-   */
-  async requestPermission() {
-    // Verifica se a API está disponível (iOS 13+)
-    const hasPermissionAPI =
-      typeof DeviceOrientationEvent !== 'undefined' &&
-      typeof DeviceOrientationEvent.requestPermission === 'function';
-
-    if (hasPermissionAPI) {
-      try {
-        const permissionState = await DeviceOrientationEvent.requestPermission();
-        if (permissionState === 'granted') {
-          // Se o usuário concedeu permissão, ativamos o listener
-          window.addEventListener('deviceorientation', this.setOrientation, true);
-          this.initialized = true;
-          console.log('Permissão de DeviceOrientation concedida!');
-        } else {
-          console.warn('Permissão de DeviceOrientation negada pelo usuário.');
-        }
-      } catch (error) {
-        console.error('Erro ao solicitar permissão de DeviceOrientation:', error);
-      }
-    } else {
-      // Se não estamos em iOS 13+ ou o método não existe, basta ativar o listener
-      window.addEventListener('deviceorientation', this.setOrientation, true);
-      this.initialized = true;
-      alert('API requestPermission não encontrada; listener adicionado sem necessidade de permissão.')
-      console.log('API requestPermission não encontrada; listener adicionado sem necessidade de permissão.');
-
-      return 'granted';
-    }
-  }
-
-  /**
-   * Callback chamado quando o dispositivo emite evento de orientação.
-   */
-  setOrientation(event) {
+    /**
+     * Clase para controlar la orientación del dispositivo.
+     * @param {Object3D} object3D - Instancia de THREE.Object3D a controlar.
+     */
+    constructor(object3D) {
 
 
-    // Bloqueia caso o controle esteja desativado ou ainda não tenha inicializado
-    if (!this.enabled || !this.initialized) return;
-
-   
-
-    const { alpha, beta, gamma } = event;
-    if (alpha === null || beta === null || gamma === null) return;
-
-    document.querySelector('.infoSystem').innerHTML = `alpha: ${alpha.toFixed(2)} | beta: ${beta.toFixed(2)} | gamma: ${gamma.toFixed(2)}`
-
-  
-
-
-    const degToRad = Math.PI / 45;
-
-  
-
-    // Define os ângulos de Euler de acordo com a orientação do dispositivo
-    // this.euler.set(
-    //   -gamma * degToRad,   // Inclinação lateral, invertida (Z)
-    //   0,//alpha * degToRad,    // Bússola (Y)
-    //   - beta * degToRad,     // Inclinação para frente/trás (X)
+        this.object3D = object3D;
+        this.object3D.rotation.reorder("YXZ");
+        this._enabled = true;
      
-    
+        this.initialized = false;
+        this.setOrientation = this.setOrientation.bind(this);
+
+        /**
+         * @type {DeviceOrientationEvent} - Objeto que contiene información sobre la orientación del dispositivo.
+         * @property {number} alpha - Valor predeterminado para alpha (0 por defecto).
+         * @property {number} beta - Valor predeterminado para beta (0 por defecto).
+         * @property {number} gamma - Valor predeterminado para gamma (0 por defecto).
+         * @see https://developer.mozilla.org/en-US/docs/Web/API/DeviceOrientationEvent
+         */
+        this.device = {
+            alpha: 0,
+            beta: 0,
+            gamma: 0
+        };
+        /**
+         * @type {number} - Screen orientation stored in radians.
+         */
+        this.screenOrientation = 0;
+
+        // this.debug = {
+        //     _source_screenOrientation: { type: null, angle: null },
+        //     _device_inputs: { alpha: 0, beta: 0, gamma: 0 },
+        //     _src_deviceOrientation: new Euler(),
+        // };
+
+        // Añadir eventos
+        // window.addEventListener('orientationchange', this.onScreen_OrientationChange);
+        // screen.orientation.addEventListener('change', this.onScreen_OrientationChange);
+        //screen.orientation.onchange = this.onScreen_OrientationChange;
+        //screen.orientation.addEventListener('change', this.onScreen_OrientationChange);
+        window.addEventListener('orientationchange', (event) => this.onScreen_OrientationChange(event));
+
+        //Must externally ask for support on IOs 13+ devices using enabled property.
    
-    //   'XYZ'                // Ordem de rotação importante!
-    // );
+        this.update();
+    }
 
-    this.euler.set(
-      -gamma * degToRad ,alpha * degToRad,0,
-      'XYZ'                // Ordem de rotação importante!
-    );
+    get enabled() { this._enabled; }
+    set enabled(value) { 
+        this._enabled = value; 
+        if(this._enabled){
+            //Subscribe to 
+            this._deviceOrientationHandler = (event) => { this.onDevice_OrientationChange(event) };
+            window.addEventListener('deviceorientation', this._deviceOrientationHandler);
+            return;
+        }
+        //Unsubscribe
+        window.removeEventListener('deviceorientation', this._deviceOrientationHandler);
+        //Maybe we should reset the device object?
+    }
 
- 
-    // Constrói a rotação final a partir dos eixos (Euler)
-    this.deviceQuaternion.setFromEuler(this.euler);
- 
-    // document.querySelector('.infoSystem').innerHTML = `${JSON.stringify(this.camera.quaternion)}`
-    // Multiplica na ordem necessária para obter a rotação correta da câmera
-    this.camera.quaternion.copy(this.worldTransform);
-    this.camera.quaternion.multiply(this.deviceQuaternion);
-    this.camera.quaternion.multiply(this.screenTransform);
-   
-  }
+    setOrientation() {}
 
-  /**
-   * Método de atualização (caso queira adicionar alguma lógica adicional por frame).
-   */
-  update() {
-    // Se necessário, adicionar lógica adicional aqui.
-  }
+    update() {
+        // console.log("DeviceOrientationControls::update()");
+        if (this._enabled === false) return;
 
-  /**
-   * Remove o listener para evitar vazamento de memória ou conflitos.
-   */
-  dispose() {
-    
-    return;
-    window.removeEventListener('deviceorientation', this.setOrientation, true);
-  }
+        // const alpha = this.deviceOrientation.alpha ? this.deviceOrientation.alpha + this._alphaOffsetAngle : 0; // Z
+        // const beta  = this.deviceOrientation.beta  ? this.deviceOrientation.beta  + this._betaOffsetAngle  : 0; // X'
+        // const gamma = this.deviceOrientation.gamma ? this.deviceOrientation.gamma + this._gammaOffsetAngle : 0; // Y''
+
+        const _deviceOrientation = new Euler();
+        _deviceOrientation.set(this.device.beta, this.device.alpha, -this.device.gamma, 'YXZ'); // 'ZXY' for the device, but 'YXZ' for us
+        // this.debug._src_deviceOrientation = _deviceOrientation;
+
+        const q0 = new Quaternion();
+        q0.setFromAxisAngle(zee, -this.screenOrientation);
+        this.object3D.quaternion.setFromEuler(_deviceOrientation);
+        this.object3D.quaternion.multiply(q1);
+        this.object3D.quaternion.multiply(q0);
+
+         document.querySelector('.infoSystem').innerHTML = `alpha: ${this.device.alpha.toFixed(2)} | beta: ${this.device.beta.toFixed(2)} | gamma: ${-this.device.gamma.toFixed(2)} | euler: ${_deviceOrientation.x.toFixed(2)} | ${_deviceOrientation.y.toFixed(2)} | ${_deviceOrientation.z.toFixed(2)}`
+
+    }
+
+    /* -------------------------------------------------------------------------- */
+    /*                                   Eventos                                  */
+    /* -------------------------------------------------------------------------- */
+    /**
+     * Maneja el evento de cambio en la orientación de la pantalla.
+     * @param {Event} event - Objeto de tipo Event que contiene información sobre el evento.
+     */
+    onScreen_OrientationChange(event) {
+        console.info(`The orientation event is of type ${event.type}`);
+        // Podemos identificar el tipo de evento que se ha disparado usando el atributo type del objeto event
+
+        if(screen.orientation){
+            const orientation = screen.orientation;
+            this.screenOrientation = windowOrientation_map[orientation.angle];
+            console.log(`Inputs are: ${orientation.angle} degrees. Result is ${this.screenOrientation} radians.`);
+            return;
+        }
+
+        //Fallback
+        this.screenOrientation = 0;
+        console.log(`Screen orientation is ${this.screenOrientation} radians.`);
+    }
+    /**
+     * Maneja el evento de cambio en la orientación del dispositivo.
+     * @param {Event} event - Objeto de tipo Event que contiene información sobre el evento.
+     */
+    onDevice_OrientationChange(event) {
+        if(event.alpha === null || event.beta === null || event.gamma === null) { 
+            this.device = { alpha: 0, beta: 0, gamma: 0 };
+            return;
+        }
+
+        this.device.alpha = MathUtils.degToRad(event.alpha); // Z
+        this.device.beta  = MathUtils.degToRad(event.beta) ; // X'
+        this.device.gamma = MathUtils.degToRad(event.gamma); // Y''
+    }
+
+    async requestPermission() {
+      // Verifica se a API está disponível (iOS 13+)
+      const hasPermissionAPI =
+        typeof DeviceOrientationEvent !== 'undefined' &&
+        typeof DeviceOrientationEvent.requestPermission === 'function';
+  
+      if (hasPermissionAPI) {
+        try {
+          const permissionState = await DeviceOrientationEvent.requestPermission();
+          if (permissionState === 'granted') {
+            // Se o usuário concedeu permissão, ativamos o listener
+            window.addEventListener('deviceorientation', this.setOrientation, true);
+            this.initialized = true;
+            console.log('Permissão de DeviceOrientation concedida!');
+            alert('✅ Permissão de DeviceOrientation concedida!');
+          } else {
+            console.warn('Permissão de DeviceOrientation negada pelo usuário.');
+            alert('🔓 Permissão de DeviceOrientation negada pelo usuário.');
+          }
+        } catch (error) {
+          console.error('Erro ao solicitar permissão de DeviceOrientation:', error);
+        }
+      } else {
+        // Se não estamos em iOS 13+ ou o método não existe, basta ativar o listener
+        window.addEventListener('deviceorientation', this.setOrientation, true);
+        this.initialized = true;
+        alert('✅ Permissão de DeviceOrientation concedida!');
+        console.log('API requestPermission não encontrada; listener adicionado sem necessidade de permissão.');
+  
+        return 'granted';
+      }
+    }
 }

@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Modo TURBO Web (Teste de Performance)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+      body {
+        background: #111;
+        color: lime;
+        font-family: monospace;
+        padding: 20px;
+      }
+      .explanation {
+        color: #ccc;
+        margin-top: 2rem;
+        line-height: 1.4;
+        font-size: 14px;
+      }
+      .warning {
+        color: red;
+      }
+    </style>
+  </head>
+  <body>
+    <h2>🔥 Modo TURBO ATIVO</h2>
+    <div id="core-info">Núcleos: ...</div>
+    <div id="stats">
+      FPS: ...<br>
+      CPU Lag: ...ms
+    </div>
+
+    <div class="explanation">
+      <h3>🧠 O que é esse teste?</h3>
+      <p>
+        Este é um experimento de <strong>modo TURBO</strong> em aplicações web, feito para estressar o máximo da CPU
+        de um dispositivo (principalmente celular) e <strong>monitorar a performance</strong>.
+      </p>
+      <p>
+        Um <strong>Web Worker</strong> roda um loop pesado de processamento para simular carga contínua na CPU.
+        Enquanto isso, a thread principal mede o <strong>FPS</strong> e o tempo de resposta do worker para detectar
+        possíveis sinais de <strong>throttling</strong> (redução de desempenho por superaquecimento).
+      </p>
+      <p>
+        O teste exibe também a <strong>quantidade de núcleos disponíveis</strong> e estima o uso de CPU com base no tempo
+        de resposta do worker. Se o "lag" ficar alto, é provável que o sistema esteja limitando o processador.
+      </p>
+    </div>
+
+    <script>
+      // Exibe a quantidade de núcleos
+      const cores = navigator.hardwareConcurrency || 'indisponível';
+      document.getElementById('core-info').textContent = `🧠 Núcleos do dispositivo: ${cores}`;
+
+      // Código do Web Worker em blob
+      const turboWorkerCode = `
+        onmessage = function (e) {
+          if (e.data === 'ping') {
+            postMessage('pong');
+          }
+        };
+
+        let dummy = 0;
+        function burnCPU() {
+          const start = performance.now();
+          while (performance.now() - start < 16) {
+            for (let i = 0; i < 100000; i++) {
+              dummy += Math.sqrt(i + Math.random());
+            }
+          }
+          setTimeout(burnCPU, 0);
+        }
+        burnCPU();
+      `;
+      const blob = new Blob([turboWorkerCode], { type: "application/javascript" });
+      const worker = new Worker(URL.createObjectURL(blob));
+
+      // Variáveis de controle
+      const statsDiv = document.getElementById('stats');
+      let last = performance.now();
+      let frameCount = 0;
+      let avgLag = 0;
+      let lastPing = performance.now();
+      let lagSamples = [];
+
+      // Recebe ping do worker
+      worker.onmessage = (e) => {
+        if (e.data === 'pong') {
+          const now = performance.now();
+          const lag = now - lastPing;
+          avgLag = 0.9 * avgLag + 0.1 * lag;
+        }
+      };
+
+      // Atualiza stats na tela
+      function updateStatsDisplay(fps, avgLag) {
+        lagSamples.push(avgLag);
+        if (lagSamples.length > 100) lagSamples.shift();
+
+        const minLag = Math.min(...lagSamples);
+        const maxLag = Math.max(...lagSamples);
+        const cpuPercent = Math.min((avgLag / 16.6) * 100, 100);
+
+        statsDiv.innerHTML = `
+          FPS: ${fps}<br>
+          CPU Lag: ${avgLag.toFixed(1)} ms<br>
+          Lag Mínimo: ${minLag.toFixed(1)} ms<br>
+          Lag Máximo: ${maxLag.toFixed(1)} ms<br>
+          Estimativa de Uso CPU: ${cpuPercent.toFixed(0)}%
+        `;
+
+        if (avgLag > 100) {
+          statsDiv.innerHTML += `<br><span class="warning">⚠️ Possível THROTTLING (superaquecimento)</span>`;
+        }
+      }
+
+      // Loop de medição
+      function monitorLoop(now) {
+        frameCount++;
+        const delta = now - last;
+
+        if (delta >= 1000) {
+          const fps = frameCount;
+          frameCount = 0;
+          last = now;
+
+          lastPing = performance.now();
+          worker.postMessage('ping');
+
+          updateStatsDisplay(fps, avgLag);
+        }
+
+        requestAnimationFrame(monitorLoop);
+      }
+
+      requestAnimationFrame(monitorLoop);
+    </script>
+  </body>
+</html>

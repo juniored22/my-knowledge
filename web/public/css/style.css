@@ -314,6 +314,7 @@ nav{
   height: auto;
   padding: 1px 20px;
   box-sizing: border-box;
+  justify-content: center;
 
 }
 

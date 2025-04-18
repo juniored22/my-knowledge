@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Estimador de Uso de CPU</title>
+  <style>
+    body {
+      background: #111;
+      color: #0f0;
+      font-family: monospace;
+      padding: 20px;
+    }
+    #output {
+      font-size: 20px;
+    }
+  </style>
+</head>
+<body>
+  <h2>🧠 Estimador de Uso de CPU (sem API nativa)</h2>
+  <div id="output">Iniciando...</div>
+
+  <script>
+    // Cria um worker em tempo real via Blob
+    const workerCode = `
+      onmessage = function(e) {
+        if (e.data === 'ping') {
+          postMessage('pong');
+        }
+        // loop artificial pra manter carga
+        let x = 0;
+        function burn() {
+          for (let i = 0; i < 1000000; i++) {
+            x += Math.sqrt(i);
+          }
+          setTimeout(burn, 0);
+        }
+        burn();
+      };
+    `;
+    const blob = new Blob([workerCode], { type: 'application/javascript' });
+    const worker = new Worker(URL.createObjectURL(blob));
+
+    const output = document.getElementById('output');
+    let lastPing = 0;
+    let avgLag = 0;
+    const history = [];
+
+    worker.onmessage = () => {
+      const now = performance.now();
+      const lag = now - lastPing;
+      avgLag = 0.9 * avgLag + 0.1 * lag;
+
+      // Limita histórico
+      history.push(avgLag);
+      if (history.length > 60) history.shift();
+
+      // Estimativa de uso (simples): baseado no atraso sobre 16.6ms (frame ideal)
+      const cpuPercent = Math.min((avgLag / 16.6) * 100, 100).toFixed(1);
+      const minLag = Math.min(...history).toFixed(1);
+      const maxLag = Math.max(...history).toFixed(1);
+
+      output.innerHTML = `
+        Lag médio: ${avgLag.toFixed(1)} ms<br>
+        Estimado de uso CPU: ${cpuPercent}%<br>
+        Mínimo: ${minLag} ms | Máximo: ${maxLag} ms<br>
+        <small>(Quanto mais lento o "pong", mais sobrecarregada está a CPU)</small>
+      `;
+    };
+
+    // Envia ping a cada segundo
+    setInterval(() => {
+      lastPing = performance.now();
+      worker.postMessage('ping');
+    }, 1000);
+  </script>
+</body>
+</html>

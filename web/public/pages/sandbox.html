@@ -1,100 +1,99 @@
 <!DOCTYPE html>
-<html lang="pt">
-  <head>
-    <meta charset="UTF-8" />
-    <title>WebXR AR com chão</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <style>
-      body {
-        margin: 0;
-        overflow: hidden;
-      }
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>MIDaS com Webcam</title>
 
-      #enter-ar {
-        position: absolute;
-        bottom: 20px;
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 12px 24px;
-        background: #ff4444;
-        color: white;
-        font-size: 18px;
-        border: none;
-        border-radius: 8px;
-        z-index: 10;
-      }
-    </style>
-  </head>
-  <body>
-    <script type="module">
-      import * as THREE from 'https://unpkg.com/three@0.152.2/build/three.module.js';
-      import { ARButton } from 'https://unpkg.com/three@0.152.2/examples/jsm/webxr/ARButton.js';
+  <!-- TensorFlow.js peer dependencies -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <!-- <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-core"></script> -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-converter"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-webgl"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/body-segmentation"></script>
+  <!-- Modelo de estimativa de profundidade -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/depth-estimation"></script>
 
-      let camera, scene, renderer;
-      let reticle, controller;
+  <style>
+    canvas, video {
+      display: block;
+      margin: 10px auto;
+      max-width: 100%;
+    }
+  </style>
+</head>
+<body>
 
-      init();
+<video id="video" autoplay playsinline muted width="640" height="480"></video>
+<canvas id="depthCanvas" width="640" height="480"></canvas>
 
-      function init() {
-        scene = new THREE.Scene();
-        camera = new THREE.PerspectiveCamera();
+<script>
+(async function () {
+  const video = document.getElementById('video');
+  video.style.transform = 'scaleX(-1)';
+  
+  const canvas = document.getElementById('depthCanvas');
+  const ctx = canvas.getContext('2d');
 
-        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
-        renderer.xr.enabled = true;
-        document.body.appendChild(renderer.domElement);
+  const modelType = depthEstimation.SupportedModels.ARPortraitDepth;
+  const estimatorConfig = { minDepth: 0, maxDepth: 1 };
+  const estimator = await depthEstimation.createEstimator(modelType, estimatorConfig);
 
-        document.body.appendChild(ARButton.createButton(renderer, { requiredFeatures: ['hit-test'] }));
+  const stream = await navigator.mediaDevices.getUserMedia({ video: {
+    facingMode: (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent)) ? 'environment' : 'user',
+  }});
+  video.srcObject = stream;
+  video.addEventListener('loadeddata', estimateDepth);
 
-        const light = new THREE.HemisphereLight(0xffffff, 0xbbbbff, 1);
-        scene.add(light);
+  async function estimateDepth() {
 
-        // Retículo onde o objeto será colocado
-        reticle = new THREE.Mesh(
-          new THREE.RingGeometry(0.1, 0.15, 32).rotateX(-Math.PI / 2),
-          new THREE.MeshBasicMaterial({ color: 0x00ff00 })
-        );
-        reticle.matrixAutoUpdate = false;
-        reticle.visible = false;
-        scene.add(reticle);
+    const depthMap = await estimator.estimateDepth(video, {
+      flipHorizontal: true,
+      inputResolution: { width: 256, height: 256 },
+      minDepth: 0.001,
+      maxDepth: 10,
+    });
 
-        controller = renderer.xr.getController(0);
-        controller.addEventListener('select', () => {
-          if (reticle.visible) {
-            const geometry = new THREE.BoxGeometry(0.2, 0.2, 0.2);
-            const material = new THREE.MeshPhongMaterial({ color: 0xff0000 });
-            const mesh = new THREE.Mesh(geometry, material);
-            mesh.position.setFromMatrixPosition(reticle.matrix);
-            scene.add(mesh);
-          }
-        });
-        scene.add(controller);
+    const depthTensor = depthMap.depthTensor;
+    const minVal = (await tf.min(depthTensor).data())[0];
+    const maxVal = (await tf.max(depthTensor).data())[0];
+    const minTensor = tf.scalar(minVal);
+    const rangeTensor = tf.scalar(maxVal - minVal);
 
-        renderer.xr.addEventListener('sessionstart', async () => {
-          const session = renderer.xr.getSession();
-          const viewerSpace = await session.requestReferenceSpace('viewer');
-          const hitTestSource = await session.requestHitTestSource({ space: viewerSpace });
+    console.log({depthMap, depthTensor, rangeTensor});
 
-          renderer.setAnimationLoop((timestamp, frame) => {
-            if (frame) {
-              const refSpace = renderer.xr.getReferenceSpace();
-              const hitTestResults = frame.getHitTestResults(hitTestSource);
+    const normalized = depthTensor.sub(minTensor)
+    .div(rangeTensor)
+    .mul(255)
+    .toInt();
 
-              if (hitTestResults.length > 0) {
-                const hit = hitTestResults[0];
-                const pose = hit.getPose(refSpace);
-                reticle.visible = true;
-                reticle.matrix.fromArray(pose.transform.matrix);
-              } else {
-                reticle.visible = false;
-              }
-            }
+    const [height, width] = normalized.shape;
+    const imageData = new ImageData(width, height);
+    const data = await normalized.data();
 
-            renderer.render(scene, camera);
-          });
-        });
-      }
-    </script>
-  </body>
+    for (let i = 0; i < data.length; i++) {
+      const val = data[i];
+      imageData.data[i * 4 + 0] = val;         // Red
+      imageData.data[i * 4 + 1] = 10;           // Green
+      imageData.data[i * 4 + 2] = 255 - val;   // Blue
+      imageData.data[i * 4 + 3] = 255;         // Alpha
+    }
+
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = width;
+    tempCanvas.height = height;
+    const tempCtx = tempCanvas.getContext('2d');
+    tempCtx.putImageData(imageData, 0, 0);
+    ctx.drawImage(tempCanvas, 0, 0, canvas.width, canvas.height);
+
+    normalized.dispose();
+    depthTensor.dispose();
+
+    requestAnimationFrame(estimateDepth);
+  }
+
+  
+})();
+</script>
+
+</body>
 </html>

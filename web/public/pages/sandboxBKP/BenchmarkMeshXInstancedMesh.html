@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <title>Benchmark Mesh vs InstancedMesh - Fundo Branco</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #fff; /* fundo branco */
+      font-family: monospace;
+    }
+    #stats {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.8);
+      color: #111;
+      padding: 10px;
+      z-index: 1;
+      font-weight: bold;
+    }
+    #toggle {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      padding: 10px 20px;
+      background: #111;
+      color: #fff;
+      font-weight: bold;
+      cursor: pointer;
+      z-index: 1;
+      border: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="stats">Carregando...</div>
+  <button id="toggle">Modo: InstancedMesh</button>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+  <script>
+    const statsEl = document.getElementById("stats");
+    const toggleBtn = document.getElementById("toggle");
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, innerWidth / innerHeight, 0.1, 2000);
+    camera.position.z = 600;
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setClearColor(0xffffff); // fundo branco no canvas
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    const geometry = new THREE.BoxGeometry(10, 10, 10);
+    const materialMesh = new THREE.MeshNormalMaterial({ flatShading: true });
+    const materialInstanced = new THREE.MeshBasicMaterial({ vertexColors: true });
+
+    const count = 3000;
+    let usingInstanced = true;
+    let instancedMesh = null;
+    let normalMeshes = [];
+
+    const dummy = new THREE.Object3D();
+    const color = new THREE.Color();
+
+    function createInstanced() {
+      const mesh = new THREE.InstancedMesh(geometry, materialInstanced, count);
+      const colors = [];
+
+      for (let i = 0; i < count; i++) {
+        dummy.position.set(
+          (Math.random() - 0.5) * 1000,
+          (Math.random() - 0.5) * 1000,
+          (Math.random() - 0.5) * 1000
+        );
+        dummy.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+
+        color.setHSL(Math.random(), 1.0, 0.5);
+        colors.push(color.r, color.g, color.b);
+      }
+
+      mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(colors), 3);
+      mesh.instanceMatrix.needsUpdate = true;
+      scene.add(mesh);
+      return mesh;
+    }
+
+    function createMeshes() {
+      const meshes = [];
+      for (let i = 0; i < count; i++) {
+        const cube = new THREE.Mesh(geometry, materialMesh);
+        cube.position.set(
+          (Math.random() - 0.5) * 1000,
+          (Math.random() - 0.5) * 1000,
+          (Math.random() - 0.5) * 1000
+        );
+        cube.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, 0);
+        scene.add(cube);
+        meshes.push(cube);
+      }
+      return meshes;
+    }
+
+    instancedMesh = createInstanced();
+
+    toggleBtn.onclick = () => {
+      usingInstanced = !usingInstanced;
+      toggleBtn.textContent = `Modo: ${usingInstanced ? 'InstancedMesh' : 'Mesh'}`;
+
+      if (usingInstanced) {
+        normalMeshes.forEach(m => scene.remove(m));
+        instancedMesh = createInstanced();
+      } else {
+        scene.remove(instancedMesh);
+        normalMeshes = createMeshes();
+      }
+    };
+
+    let lastTime = performance.now();
+    let frameCount = 0;
+    let fps = 0;
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const now = performance.now();
+      const delta = now - lastTime;
+      frameCount++;
+
+      if (delta >= 1000) {
+        fps = frameCount;
+        frameCount = 0;
+        lastTime = now;
+      }
+
+      scene.rotation.y += 0.001;
+
+      const start = performance.now();
+
+      if (usingInstanced && instancedMesh) {
+        for (let i = 0; i < count; i++) {
+          instancedMesh.getMatrixAt(i, dummy.matrix);
+          dummy.rotation.y += 0.01;
+          dummy.updateMatrix();
+          instancedMesh.setMatrixAt(i, dummy.matrix);
+        }
+        instancedMesh.instanceMatrix.needsUpdate = true;
+      }
+
+      if (!usingInstanced && normalMeshes.length) {
+        for (let cube of normalMeshes) {
+          cube.rotation.y += 0.01;
+        }
+      }
+
+      renderer.render(scene, camera);
+
+      const end = performance.now();
+      statsEl.innerHTML = `
+        🧱 Objetos: ${count}<br>
+        🔁 Modo: ${usingInstanced ? 'InstancedMesh ✅' : 'Mesh ❌'}<br>
+        🎮 FPS: ${fps}<br>
+        ⏱️ Tempo de render: ${(end - start).toFixed(2)} ms
+      `;
+    }
+
+    animate();
+  </script>
+</body>
+</html>

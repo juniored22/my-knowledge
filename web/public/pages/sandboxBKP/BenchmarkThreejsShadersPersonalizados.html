@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8" />
+  <title>Benchmark Three.js com Shaders Personalizados</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: monospace;
+      background: #000;
+      color: #0f0;
+    }
+    #stats {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 10px;
+      font-size: 14px;
+      z-index: 999;
+    }
+  </style>
+</head>
+<body>
+  <div id="stats">Carregando...</div>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+  <script>
+    const statsEl = document.getElementById("stats");
+
+    // Setup básico
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 1000);
+    camera.position.z = 3;
+
+    const renderer = new THREE.WebGLRenderer();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    document.body.appendChild(renderer.domElement);
+
+    // Geometria simples (plano cobrindo a tela)
+    const geometry = new THREE.PlaneGeometry(2, 2);
+
+    // Shaders customizados pesados
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        uTime: { value: 0.0 },
+        uResolution: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) }
+      },
+      fragmentShader: `
+        uniform float uTime;
+        uniform vec2 uResolution;
+
+        void main() {
+          vec2 st = gl_FragCoord.xy / uResolution;
+          float r = sin(st.x * 100.0 + uTime * 5.0);
+          float g = cos(st.y * 100.0 + uTime * 3.0);
+          float b = sin(st.x * 50.0 + st.y * 50.0 + uTime * 2.0);
+
+          // Simulação de carga pesada
+          float brightness = 0.0;
+          for (int i = 0; i < 100; i++) {
+            brightness += sin(r * g * b * float(i));
+          }
+
+          gl_FragColor = vec4(vec3(r, g, b) * brightness * 0.01, 1.0);
+        }
+      `,
+      vertexShader: `
+        void main() {
+          gl_Position = vec4(position, 1.0);
+        }
+      `
+    });
+
+    const mesh = new THREE.Mesh(geometry, material);
+    scene.add(mesh);
+
+    // Medidor de FPS
+    let lastTime = performance.now();
+    let frameCount = 0;
+    let fps = 0;
+
+    function animate(time) {
+      requestAnimationFrame(animate);
+
+      const now = performance.now();
+      const delta = now - lastTime;
+      frameCount++;
+
+      if (delta >= 1000) {
+        fps = frameCount;
+        frameCount = 0;
+        lastTime = now;
+      }
+
+      // Atualiza tempo no shader
+      material.uniforms.uTime.value = time * 0.001;
+
+      const start = performance.now();
+      renderer.render(scene, camera);
+      const end = performance.now();
+
+      statsEl.innerHTML = `
+        🎮 FPS: ${fps}<br>
+        ⏱️ Render time: ${(end - start).toFixed(2)} ms<br>
+        ⚙️ Shader: cálculos pesados x100
+      `;
+    }
+
+    animate();
+  </script>
+</body>
+</html>
